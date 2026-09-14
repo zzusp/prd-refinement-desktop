@@ -16,3 +16,7 @@ ui-checklist-only,3,PASS,round-3.md
 package-checklist-only,3,PASS,round-3.md
 actual-electron,3,PASS,round-3.md
 real-prd,3,PASS,round-3.md
+main-branch-content,4,PASS,round-4.md
+compiled-pipeline,4,PASS,round-4.md
+desktop-restart,4,PASS,round-4.md
+actual-electron-ui,4,PASS,round-4.md

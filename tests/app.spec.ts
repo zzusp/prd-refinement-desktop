@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, runtimeTiming } from '../src/App.js';
-import { ResultIssues } from '../src/ResultIssues.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
@@ -85,8 +84,6 @@ describe('需求细化数据契约', () => {
 
   it('历史业务待处理事项和建议不进入当前页面',()=>{
     const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款金额是否含税？',state:'open',resolutionProposal:{recommendation:'采用含税金额'}}]} as any;
-    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project}));
-    expect(html).toBe('');
     const task={id:'T-1',resultVersion:2,status:'completed',project} as AnalysisTask;
     const feedback=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
     expect(feedback).not.toContain('采纳');
@@ -94,17 +91,15 @@ describe('需求细化数据契约', () => {
     expect(feedback).toContain('清单中的功能和需求必须存在于 PRD');
   });
 
-  it('平台校验失败保留在执行记录，不变成业务建议',()=>{
+  it('平台校验过程不进入用户结果页',()=>{
     const project={features:[],requirements:[],sourceUnits:[],audit:{issues:[{id:'A-1',owner:'runtime-output',detail:'当前节点输出缺少有效原文引用。',sourceUnitIds:[],affectedIds:[],disposition:'open'}]}} as any;
-    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project}));
-    expect(html).toContain('清单校验明细');
-    expect(html).toContain('仅供追溯');
+    const task={id:'T-1',resultVersion:2,status:'completed',progress:100,steps:[],project} as AnalysisTask;
+    const html=renderToStaticMarkup(React.createElement(ExecutionRecord,{task,now:Date.now()}));
+    expect(html).not.toContain('清单校验明细');
     expect(html).not.toContain('平台检查记录');
-    expect(html).toContain('分析结果未能通过校验');
-    expect(html).toContain('当前节点输出缺少有效原文引用');
-    expect(html).toContain('未通过');
-    expect(html).not.toContain('建议方案');
-    expect(html).not.toContain('待处理事项');
+    expect(html).not.toContain('当前节点输出缺少有效原文引用');
+    expect(html).not.toContain('未通过');
+    expect(html).not.toContain('已修复');
   });
 
   it('草稿存储不可用时不阻断页面',()=>{

@@ -102,16 +102,15 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('已修复');
   });
 
-  it('全部阶段结束后将平台未完成与执行进度分开表达',()=>{
-    const task={id:'T-1',status:'needs-attention',progress:100,error:'正式交付准入未通过',steps:[{id:'delivery',name:'生成结果',note:'已生成草稿',status:'completed'}],project:{features:[],requirements:[],sourceUnits:[]}} as unknown as AnalysisTask;
+  it('全部阶段成功结束后只显示已完成与 100%',()=>{
+    const task={id:'T-1',status:'completed',progress:100,steps:[{id:'delivery',name:'生成结果',note:'已生成草稿',status:'completed'}],project:{features:[],requirements:[],sourceUnits:[],delivery:{state:'blocked'}}} as unknown as AnalysisTask;
     const html=renderToStaticMarkup(React.createElement(ExecutionRecord,{task,now:Date.now(),onRecover:()=>undefined}));
-    expect(taskStatusLabel(task)).toBe('平台未完成');
-    expect(html).toContain('平台未完成');
+    expect(taskStatusLabel(task)).toBe('已完成');
+    expect(html).toContain('执行已完成');
     expect(html).toContain('100%');
-    expect(html).toContain('执行已结束');
-    expect(html).toContain('正式结果需要重新处理');
-    expect(html).toContain('继续处理');
-    expect(html).not.toContain('执行已完成');
+    expect(html).not.toContain('平台未完成');
+    expect(html).not.toContain('正式结果需要重新处理');
+    expect(html).not.toContain('继续处理');
     expect(html).not.toContain('88%');
   });
 

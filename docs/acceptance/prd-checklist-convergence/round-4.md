@@ -14,6 +14,8 @@
 - 编译文件回读 `CURRENT_PIPELINE_VERSION = 27`，不存在旧 clarificationContract；细化和依据核查提示词明确禁止生成待处理事项、阻塞分析、建议和澄清。
 - 日常 Electron 已从当前修复分支重新启动，主进程 PID `377492`，启动日志确认 prestart 编译、Vite 5173 和 Electron 均成功启动。
 - 项目已有真实 Electron 检查脚本打开 Pipeline 27 真实任务页面，回读 `views=[功能与需求,全部需求,执行记录]`、`hasPending=false`、`hasProposal=false`。
+- PR #5 的 base 为 `main`，GitHub 回查 state=`MERGED`、merge commit=`f64dfabbede35a8df03ebae428048216317216fb`；本地 `main` 与 `origin/main` 均指向该提交。
+- 合并后从 `main` 再次启动日常 Electron，主进程 PID `88672`；编译产物回读 Pipeline 27，实际页面复验仍为 hasPending=false、hasProposal=false。
 
 ## 边界
 

@@ -5,3 +5,5 @@
 实际 Electron 隔离任务 `T-B741D978` 使用 Terra 完成 Pipeline 27 全七阶段，生成 8 个模块、168 条需求、0 项澄清和 schema v4 ready 包。页面只有功能与需求、全部需求、执行记录；导出只包含需求清单、来源和冻结资料。平台执行或结构校验错误继续作为平台错误处理，不会伪装成业务待处理事项。
 
 自动验证为 23 个测试文件、241 项测试通过，typecheck、build、verify:premium 通过。完整证据见 `round-3.md`，状态以 `matrix.csv` 为准；隔离 Terra 结果不代表原日常模型容量恢复，也不构成自然语言语义“零遗漏”证明。
+
+第四轮修正了交付链：原 PR #4 合入了已经脱离 main 的功能分支，导致日常实例仍运行 Pipeline 22。PR #5 已将完整差异合入 main，merge commit 为 `f64dfab`；日常 Electron 从该提交重新启动并回读 Pipeline 27，页面无待处理事项和建议入口。完整证据见 `round-4.md`。

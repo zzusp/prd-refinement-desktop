@@ -49,7 +49,6 @@ contextBridge.exposeInMainWorld('prdApp', {
   retryAnalysis: (taskId: string) => ipcRenderer.invoke('analysis:retry', taskId),
   restartAnalysis: (taskId: string) => ipcRenderer.invoke('analysis:restart', taskId),
   adjustAnalysis: (request: import('../src/types.js').RefinementAdjustmentRequest) => ipcRenderer.invoke('analysis:adjust', request),
-  generateResolutionProposals: (taskId: string) => ipcRenderer.invoke('analysis:generate-resolution-proposals', taskId),
   onAnalysisTaskUpdate: (callback: (task: import('../src/types.js').AnalysisTask) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, task: import('../src/types.js').AnalysisTask) => callback(task);
     ipcRenderer.on('analysis:task-update', listener);

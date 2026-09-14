@@ -39,7 +39,6 @@ import type {
 import { MaterialWorkspace } from "./MaterialWorkspace";
 import { ResultIssues } from "./ResultIssues";
 import {
-  clarificationCounts,
   featureTitle,
   readableContext,
   requirementSourceRefs,
@@ -52,8 +51,8 @@ const stepDefs = [
   ["inventory", "原文建账", "登记原文、结构、位置与缺失材料"],
   ["candidates", "功能候选识别", "按连贯原文包并行识别功能候选"],
   ["unify", "功能清单整理", "去重并统一功能边界与来源"],
-  ["details", "逐功能细化", "逐项整理需求、条件与待澄清内容"],
-  ["audit", "产物依据核查", "核查已有主张是否受来源支持"],
+  ["details", "逐功能细化", "按原文整理简短需求清单"],
+  ["audit", "产物依据核查", "核查需求清单是否忠于 PRD 原文"],
   ["repair", "有据修正", "仅修正已确认的无依据或误读内容"],
   ["delivery", "结果发布", "校验最终快照并生成 Agent 需求包"],
 ];
@@ -65,7 +64,7 @@ const modelNodes: [ModelNodeId, string, string][] = [
   ["featureGlobal", "功能清单整理", "处理语义重叠和边界争议"],
   ["detailsFast", "简单功能细化", "整理短小、无复杂联动的功能"],
   ["details", "复杂功能细化", "处理状态、权限、依赖和复杂条件"],
-  ["audit", "产物依据核查", "核查已有主张是否受来源支持"],
+  ["audit", "产物依据核查", "核查需求清单是否忠于 PRD 原文"],
   ["repair", "有据修正", "只处理已确认的无依据或误读内容"],
 ];
 const defaultNodeProfiles = (
@@ -137,7 +136,7 @@ const stepModelNodes: Record<
     {
       node: "audit",
       label: "依据核查",
-      purpose: "核查已有主张、条件和澄清是否受依据支持",
+      purpose: "核查需求清单是否保留原意并有原文依据",
     },
   ],
   repair: [
@@ -193,7 +192,7 @@ function stepDisplayNote(note: string) {
   return note.replaceAll("来源包", "候选内容");
 }
 type Page = "tasks" | "upload" | "task" | "settings";
-type ResultTab = "features" | "requirements" | "issues" | "execution";
+type ResultTab = "features" | "requirements" | "execution";
 type AdjustmentRequest = RefinementAdjustmentRequest;
 function taskRootId(task: AnalysisTask) {
   return task.rootTaskId ?? task.id;
@@ -785,19 +784,11 @@ function TaskPage({
   const [deleting, setDeleting] = useState(false),
     [managing, setManaging] = useState(false);
   const [failureAction, setFailureAction] = useState<"retry" | "restart">();
-  const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
-  const [proposalOverrides,setProposalOverrides]=useState<Record<string,string>>({});
-  const proposalLoadedKey=useRef('');
-  const [generatingProposals,setGeneratingProposals]=useState(false);
   const rootKey = taskRootId(task);
-  const proposalStorageKey=`prd-proposal-overrides:${task.id}:${taskVersion(task)}`;
   const inScope = task.project.requirements.filter(
       (item) => item.deliveryScope !== "excluded",
     ).length,
     excluded = task.project.requirements.length - inScope,
-    issues = clarificationCounts(task.project),
-    issueCount =
-      issues.blocking + issues.suggestion + issues.ignorable + issues.platform,
     canAdjust =
       !task.archivedAt &&
       (task.status === "completed" || task.status === "needs-attention"),
@@ -810,15 +801,11 @@ function TaskPage({
     );
     setFeatureFilter(undefined);
     setDetail(undefined);
-    setSelectedProposalIds([]);
-    setProposalOverrides({});
     setFailureAction(undefined);
   }, [rootKey]);
   useEffect(() => {
     if (task.status !== "failed") setFailureAction(undefined);
   }, [task.status]);
-  useEffect(()=>{setSelectedProposalIds([]);try{const value=window.localStorage.getItem(proposalStorageKey);proposalLoadedKey.current=proposalStorageKey;setProposalOverrides(value?JSON.parse(value):{})}catch{proposalLoadedKey.current=proposalStorageKey;setProposalOverrides({})}},[proposalStorageKey]);
-  useEffect(()=>{if(proposalLoadedKey.current!==proposalStorageKey)return;try{window.localStorage.setItem(proposalStorageKey,JSON.stringify(proposalOverrides))}catch{/* 本地存储不可用不阻断调整 */}},[proposalStorageKey,proposalOverrides]);
   useEffect(() => {
     let current = true;
     void window.prdApp
@@ -911,7 +898,6 @@ function TaskPage({
       setFailureAction(undefined);
     }
   }
-  async function generateProposals(){setGeneratingProposals(true);setActionMessage(undefined);try{await window.prdApp.generateResolutionProposals(task.id);setActionMessage({kind:'success',text:'阻塞事项的建议方案已生成。'})}catch(value){setActionMessage({kind:'error',text:value instanceof Error?value.message:'建议方案生成失败，请重试。'})}finally{setGeneratingProposals(false)}}
   return (
     <div className="page task-workspace">
       <button className="back" onClick={onBack}>
@@ -1004,7 +990,6 @@ function TaskPage({
         </em>
         <span>本期 {inScope} 条</span>
         <span>本期不做 {excluded} 条</span>
-        <span>待处理 {issueCount} 项</span>
         <details>
           <summary>耗时/用量</summary>
           <RuntimeCost task={task} />
@@ -1027,18 +1012,12 @@ function TaskPage({
         setFeatureFilter={setFeatureFilter}
         onDetail={setDetail}
         onScope={onScope}
-        selectedProposalIds={selectedProposalIds}
-        onProposalSelection={setSelectedProposalIds}
-        proposalOverrides={proposalOverrides}
-        onProposalOverride={(id,value)=>setProposalOverrides(current=>{const next={...current};if(value)next[id]=value;else delete next[id];return next})}
-        onGenerateProposals={()=>void generateProposals()}
-        generatingProposals={generatingProposals}
         failureAction={failureAction}
         onRecover={(action) => void recover(action)}
         now={now}
       />
       {task.project.analysisInput?.text&&<details className="task-input-summary"><summary>本次分析输入 <span>用户补充 · {task.project.analysisInput.text.length.toLocaleString('zh-CN')} 字</span></summary><div><small>提交于 {new Date(task.project.analysisInput.submittedAt).toLocaleString('zh-CN')} · 已随第 {task.project.analysisInput.revision} 版输入固定</small><pre>{task.project.analysisInput.text}</pre>{task.project.analysisInputApplications?.length?<section className="input-application-list"><h4>平台如何使用这些内容</h4>{task.project.analysisInputApplications.map(item=><article key={item.sourceUnitId}><strong>{item.kind==='business-fact'?'业务补充':item.kind==='scope-decision'?'本期范围':item.kind==='organization'?'整理要求':item.kind==='question'?'待回答问题':'替换口径'}</strong><span>{item.summary}</span><em>{item.status==='pending'?'仍待确认':item.affectedFeatureIds.length?`已应用到 ${item.affectedFeatureIds.length} 个功能`:'已记录'}</em></article>)}</section>:null}</div></details>}
-      {canAdjust && <TaskFeedback task={task} onAdjust={onAdjust} selectedProposalIds={selectedProposalIds} proposalOverrides={proposalOverrides} onProposalSelection={ids=>{setSelectedProposalIds(ids);setProposalOverrides(current=>Object.fromEntries(Object.entries(current).filter(([id])=>ids.includes(id))))}} />}{" "}
+      {canAdjust && <TaskFeedback task={task} onAdjust={onAdjust} />}{" "}
       {detail && (
         <Drawer
           project={task.project}
@@ -1230,15 +1209,9 @@ function feedbackStorage() {
 export function TaskFeedback({
   task,
   onAdjust,
-  selectedProposalIds = [],
-  proposalOverrides = {},
-  onProposalSelection,
 }: {
   task: AnalysisTask;
   onAdjust: (request: AdjustmentRequest) => Promise<void>;
-  selectedProposalIds?: string[];
-  proposalOverrides?: Record<string,string>;
-  onProposalSelection?: (ids: string[]) => void;
 }) {
   const storageKey = `prd-feedback-draft:${taskRootId(task)}`;
   const [draft, setDraft] = useState(() =>
@@ -1262,18 +1235,10 @@ export function TaskFeedback({
   }, [storageKey, draft]);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const selected = task.project.clarifications.filter(
-        (item) => selectedProposalIds.includes(item.id) && item.resolutionProposal,
-      ),
-      proposalText = selected
-        .map(
-          (item) =>
-            `关于“${item.question}”，采纳建议方案：${proposalOverrides[item.id]??item.resolutionProposal!.recommendation}`,
-        )
-        .join("\n"),
-      feedback = [draft.trim(), proposalText].filter(Boolean).join("\n");
+    if (busy) return;
+    const feedback = draft.trim();
     if (!feedback) {
-      setMessage({ kind: "error", text: "请描述希望调整、补充或澄清的内容。" });
+      setMessage({ kind: "error", text: "请描述希望如何调整功能模块或需求清单。" });
       return;
     }
     setBusy(true);
@@ -1283,19 +1248,9 @@ export function TaskFeedback({
         baseTaskId: task.id,
         baseVersion: taskVersion(task),
         feedback,
-        acceptedProposalIds: selected.map((item) => item.id),
-        acceptedProposals: selected.map((item) => ({
-          clarificationId: item.id,
-          baseRecommendation: item.resolutionProposal!.recommendation,
-          finalText: proposalOverrides[item.id] ?? item.resolutionProposal!.recommendation,
-        })),
-        references: selected.map((item) => ({
-          kind: "clarification" as const,
-          id: item.id,
-        })),
+        references: [],
       });
       setDraft("");
-      onProposalSelection?.([]);
       clearFeedbackDraft(feedbackStorage(), storageKey);
       setMessage({
         kind: "success",
@@ -1336,7 +1291,7 @@ export function TaskFeedback({
                     : item.status === "needs-confirmation"
                       ? "需要确认"
                       : item.status === "deferred"
-                        ? "已保留待处理"
+                        ? "暂未应用"
                         : "未成功"}
                 </b>
                 <span>{item.detail}</span>
@@ -1345,23 +1300,12 @@ export function TaskFeedback({
           </ul>
         </div>
       )}
-      {selectedProposalIds.length > 0 && (
-          <div className="selected-proposals">
-            <div>
-              <strong>本次将采纳 {selectedProposalIds.length} 项建议方案{selectedProposalIds.filter(id=>proposalOverrides[id]).length?`，其中 ${selectedProposalIds.filter(id=>proposalOverrides[id]).length} 项已修改`:''}</strong>
-              <span>可在下方补充例外或修改口径；你输入的说明优先。</span>
-            </div>
-            <button type="button" className="text-action" onClick={() => onProposalSelection?.([])}>
-              清空选择
-            </button>
-          </div>
-      )}
       <form noValidate onSubmit={submit}>
         <div className="task-feedback-heading">
           <div>
             <h2 id="task-feedback-title">描述你希望怎么调整</h2>
             <p>
-              可以一次写多条意见、补充业务口径或回答多个澄清，平台会定位相关内容统一处理。
+              可以调整模块组织、需求颗粒度或指出遗漏。清单中的功能和需求必须存在于 PRD，并保留原意。
             </p>
           </div>
           <button
@@ -1392,7 +1336,7 @@ export function TaskFeedback({
             if (shouldSubmitFeedback(event))
               event.currentTarget.form?.requestSubmit();
           }}
-          placeholder="例如：订单查询的筛选条件合并描述；退款审核按发起、审核、完成展开。退款金额统一按含税处理，相关澄清一起更新。支付超时先保留，其他内容不动。"
+          placeholder="例如：合并订单查询的筛选需求；退款审核按原文的发起、审核、完成分别列项；补上 PRD 中的取消订单功能。"
         />
         <footer>
           <small id="task-feedback-hint">
@@ -1401,14 +1345,10 @@ export function TaskFeedback({
           <button
             className="primary"
             type="submit"
-            disabled={busy || (!draft.trim() && !selectedProposalIds.length)}
+            disabled={busy || !draft.trim()}
             aria-busy={busy}
           >
-            {busy
-              ? "正在提交"
-              : selectedProposalIds.length
-                ? `按所选方案调整（${selectedProposalIds.length}）`
-                : "按说明调整"}
+            {busy ? "正在提交" : "按说明调整"}
           </button>
         </footer>
         {message && (
@@ -1427,7 +1367,6 @@ export function TaskFeedback({
 function metricNode(id: string) {
   if (id.includes("-asset-")) return "图片读取";
   if (id.includes("input-interpretation")) return "补充说明理解";
-  if (id.includes("-proposal-")) return "阻塞事项建议";
   if (id.includes("-adjustment")) return "统一调整";
   if (id.includes("-candidate-")) return "功能候选识别";
   if (id.includes("-unify")) return "功能清单统一";
@@ -1662,12 +1601,6 @@ function Results({
   setFeatureFilter,
   onDetail,
   onScope,
-  selectedProposalIds,
-  onProposalSelection,
-  proposalOverrides,
-  onProposalOverride,
-  onGenerateProposals,
-  generatingProposals,
   failureAction,
   onRecover,
   now,
@@ -1680,21 +1613,13 @@ function Results({
   setFeatureFilter: (id?: string) => void;
   onDetail: (r: RequirementDetail) => void;
   onScope: (request: DeliveryScopeUpdateRequest) => Promise<void>;
-  selectedProposalIds: string[];
-  onProposalSelection: (ids: string[]) => void;
-  proposalOverrides: Record<string,string>;
-  onProposalOverride: (id:string,value:string|undefined) => void;
-  onGenerateProposals: () => void;
-  generatingProposals: boolean;
   failureAction?: "retry" | "restart";
   onRecover: (action: "retry" | "restart") => void;
   now: number;
 }) {
-  const counts = clarificationCounts(project),
-    tabs: [ResultTab, string][] = [
+  const tabs: [ResultTab, string][] = [
       ["features", "功能与需求"],
       ["requirements", "全部需求"],
-      ["issues", "待处理事项"],
       ["execution", "执行记录"],
     ];
   return (
@@ -1711,14 +1636,6 @@ function Results({
             key={id}
           >
             {label}
-            {id === "issues" && (
-              <b>
-                {counts.blocking +
-                  counts.suggestion +
-                  counts.ignorable +
-                  counts.platform}
-              </b>
-            )}
           </button>
         ))}
       </nav>
@@ -1742,16 +1659,6 @@ function Results({
             onDetail={onDetail}
             onScope={onScope}
           />
-        ) : tab === "issues" ? (
-          <ResultIssues
-            project={project}
-            selectedProposalIds={selectedProposalIds}
-            onProposalSelection={onProposalSelection}
-            proposalOverrides={proposalOverrides}
-            onProposalOverride={onProposalOverride}
-            onGenerateProposals={onGenerateProposals}
-            generating={generatingProposals}
-          />
         ) : (
           <ExecutionRecord task={task} now={now} failureAction={failureAction} onRecover={onRecover} />
         )}
@@ -1762,6 +1669,7 @@ function Results({
 export function ExecutionRecord({ task, now, failureAction, onRecover }: { task: AnalysisTask; now: number; failureAction?: "retry" | "restart"; onRecover?: (action: "retry" | "restart") => void }) {
   return (
     <section className="execution-record">
+      <ResultIssues project={task.project} />
       {task.error && task.status === "failed" && (
         <div className="workspace-error" role="alert">
           <AlertTriangle />
@@ -2079,7 +1987,7 @@ function RequirementList({
         p.requirements.filter(
           (item) =>
             (!allowed || allowed.has(item.id)) &&
-            `${item.id}${item.title}${item.behavior}${item.conditions.join()}${item.constraints.join()}`.includes(
+            `${item.id}${item.text}`.includes(
               q,
             ) &&
             (filter === "all" ||
@@ -2170,7 +2078,7 @@ function RequirementList({
           </label>
           <span>编号</span>
           <span>需求明细</span>
-          <span>条件</span>
+          <span>原文</span>
           <span>检查状态</span>
           <span>本期范围</span>
         </div>
@@ -2185,7 +2093,7 @@ function RequirementList({
                 <input
                   type="checkbox"
                   checked={checked}
-                  aria-label={`选择 ${item.title}`}
+                  aria-label={`选择 ${item.text}`}
                   onChange={() =>
                     setSelected((current) =>
                       checked
@@ -2201,13 +2109,13 @@ function RequirementList({
               >
                 <code>{item.id}</code>
                 <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.behavior}</small>
+                  <strong>{item.text}</strong>
+                  <small>{p.features.find(feature => feature.id === item.featureId) ? featureTitle(p, p.features.find(feature => feature.id === item.featureId)!) : '模块待定位'}</small>
                 </span>
-                <b>{item.conditions.length + item.constraints.length}</b>
+                <b>{item.sourceRefs.length}</b>
                 <b>
                   {item.state === "needs-clarification"
-                    ? "有待澄清项"
+                    ? "待核查"
                     : item.state === "reviewed"
                       ? "检查通过"
                       : "尚未检查"}
@@ -2363,10 +2271,10 @@ function Drawer({
       <header>
         <div>
           <code>{item.id}</code>
-          <h2>{item.title}</h2>
+          <h2>{item.text}</h2>
           <small>
             {item.state === "needs-clarification"
-              ? "有待澄清项"
+              ? "待核查"
               : item.state === "reviewed"
                 ? "检查通过"
                 : "尚未检查"}
@@ -2377,24 +2285,6 @@ function Drawer({
         </button>
       </header>
       <div>
-        <h3>具体要求</h3>
-        <p>{item.behavior}</p>
-        <h3>条件与限制</h3>
-        {[...item.conditions, ...item.constraints].map((x) => (
-          <p className="rule" key={x}>
-            {x}
-          </p>
-        ))}
-        {item.explicitAcceptanceConditions.length > 0 && (
-          <>
-            <h3>PRD 原文明示验收条件</h3>
-            {item.explicitAcceptanceConditions.map((x) => (
-              <p className="rule" key={x}>
-                {x}
-              </p>
-            ))}
-          </>
-        )}
         <h3>原文及位置</h3>
         {requirementSourceRefs(item).map((ref, index) => {
           const source = project.sourceUnits.find(
@@ -2835,4 +2725,4 @@ function RuntimeSettings({
   );
 }
 
-export { TaskPage, featureScope };
+export { TaskPage, featureScope, RequirementList, Drawer };

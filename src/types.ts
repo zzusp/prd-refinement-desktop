@@ -377,8 +377,6 @@ export interface PromptCallMetric {
   estimateMethod:'cjk-and-ascii-v1';
   sections:Record<string,number>;
   budgetClass:'candidate'|'audit'|'repair';
-  targetTokens:number;
-  hardTokens:number;
   requestHash:string;
 }
 
@@ -398,7 +396,7 @@ export interface AnalysisTask {
   runtimeConfig?: RuntimeConfigSnapshot;
   attempt: number;
   checkpoint?: {
-    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
     clarificationResults?: { dependencyHash: string; results: Record<string, { status: 'candidate' | 'verified' | 'rejected'; value?: unknown; attempts: number; feedback?: string }> };
     resultVersion?:number;
     checks?:Partial<Record<RequiredCheckId,AnalysisCheckRecord>>;
@@ -436,6 +434,8 @@ export interface AnalysisTask {
     detailResults?: Record<string,{requirements:RequirementDetail[];clarifications:Clarification[]}>;
     auditIssueBatches?: AuditIssue[][];
     relationBatches?: RequirementRelation[][];
+    auditWorkStates?:Record<string,{state:'running'|'succeeded'|'failed';inputHash:string;attempts:number;error?:string;updatedAt:number}>;
+    executionFailures?:Array<{node:ModelNodeId;purpose:string;subjectId?:string;category:'runtime'|'validation'|'internal';message:string;at:number}>;
     repairedFeatureIds?: string[];
     featureCandidateFingerprint?: string;
     repairs?: RepairRecord[];

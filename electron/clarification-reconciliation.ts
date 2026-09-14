@@ -1,5 +1,5 @@
 import type { Clarification, ClarificationAction, PrdProject, SourceRef, SourceUnit } from '../src/types.js';
-import { assertPromptBudget, type PromptMeasurement } from './prompt-budget.js';
+import type { PromptMeasurement } from './prompt-budget.js';
 import { buildEvidenceCatalog } from './source-evidence.js';
 import { reconcileRelations } from './clarification-relations.js';
 
@@ -64,10 +64,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
     const packs: typeof atoms[] = [];
     let current: typeof atoms = [];
     for (const atom of atoms) {
-      const size = context.measure(extractionTitle, factContract, merge([...current, atom]));
-      if (current.length && size.estimatedTokens > size.targetTokens) { packs.push(current); current = []; }
+      if (current.length >= 12) { packs.push(current); current = []; }
       current.push(atom);
-      assertPromptBudget(context.measure(extractionTitle, factContract, merge(current)));
     }
     if (current.length) packs.push(current);
     if (!packs.length) return inspect([question], requirements, units);
@@ -85,24 +83,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
     const jointContract = instruction + ' 当前已完成全部证据分片。可以联合不同分片的定义、条件、规则推导新答案，不得只选择某个分片动作。输出 actions，并在每个 remove-answered 动作提供 evidenceIds。keep 仅限真实业务缺口，不得因分片缺证保留。平台尚未查清返回 {"unresolved":"具体平台问题"}。依据原文事实及例外裁决。';
     const compactRequirements = requirements.map(({id, sourceUnitIds}) => ({id, sourceUnitIds}));
     const jointInput = (facts: Fact[]) => ({...evidenceInput(facts), requirements: compactRequirements, clarifications: [question], checkedScopes: reports.map(report => report.scope)});
-    let facts = allFacts;
-    // 仅超预算时压缩相关事实；原始报告保留，最终逐片反证检查不跳过。
-    for (let round = 0; context.measure(summaryTitle, jointContract, jointInput(facts)).estimatedTokens > context.measure(summaryTitle, jointContract, jointInput(facts)).targetTokens; round++) {
-      if (round === 3) throw new Error(`平台证据汇总仍超过预算：${question.id}，未截断证据，需缩小问题范围`);
-      const compactContract = factContract + ' 本次是证据整理：合并同义事实、去除与问题无关内容，保留完整推导所需定义、条件及所有相关例外，不作最终判断。';
-      const groups: Fact[][] = []; let group: Fact[] = [];
-      for (const fact of facts) {
-        const size = context.measure('待澄清事项证据整理', compactContract, evidenceInput([...group, fact]));
-        if (group.length && size.estimatedTokens > size.targetTokens / 2) { groups.push(group); group = []; }
-        group.push(fact); assertPromptBudget(context.measure('待澄清事项证据整理', compactContract, evidenceInput(group)));
-      }
-      if (group.length) groups.push(group);
-      const previous = JSON.stringify(jointInput(facts)).length;
-      facts = (await context.parallel(groups, async group => (await context.ask('待澄清事项证据整理', 'clarification-evidence-compact', compactContract, evidenceInput(group), value => acceptFacts(value, units, uniqueRefs(group.flatMap(fact => fact.sourceRefs))))).value)).flat();
-      if (JSON.stringify(jointInput(facts)).length >= previous) throw new Error(`平台证据整理未收敛：${question.id}，完整证据仍无法装入汇总预算`);
-    }
+    const facts = allFacts;
     const input = jointInput(facts);
-    assertPromptBudget(context.measure(summaryTitle, jointContract, input));
     for (;;) {
       const candidate = await context.ask(summaryTitle, 'clarification-evidence-summary', jointContract, input, value => {
         if (typeof value.unresolved === 'string' && value.unresolved.trim()) return {actions: [] as ClarificationAction[], unresolved: value.unresolved, refs: [] as SourceRef[]};
@@ -122,9 +104,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
       // 复核按最终请求重新装箱，给联合依据预留预算，不沿用提取阶段的满分片。
       const verifyPacks: SourceRef[][] = []; let selected: SourceRef[] = [];
       for (const ref of buildEvidenceCatalog(units)) {
-        const size = context.measure(verifyTitle, verifyContract, verifyInputFor([...selected, ref]));
-        if (selected.length && size.estimatedTokens > size.targetTokens) { verifyPacks.push(selected); selected = []; }
-        selected.push(ref); assertPromptBudget(context.measure(verifyTitle, verifyContract, verifyInputFor(selected)));
+        if (selected.length >= 24) { verifyPacks.push(selected); selected = []; }
+        selected.push(ref);
       }
       if (selected.length) verifyPacks.push(selected);
       const checks = await context.parallel(verifyPacks, async refs => {
@@ -143,12 +124,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
     }
   };
   const inspectGroup = async (questions: Clarification[]): Promise<ClarificationAction[]> => {
-    const {requirements, units} = scope(questions);
-    const size = context.measure(title, instruction, {sourceUnits: units, requirements, clarifications: questions});
-    if (size.estimatedTokens <= size.targetTokens) return inspect(questions, requirements, units);
-    if (questions.length === 1) return inspectOne(questions[0], requirements, units);
-    const middle = Math.ceil(questions.length / 2);
-    return (await context.parallel([questions.slice(0, middle), questions.slice(middle)], inspectGroup)).flat();
+    const results=await context.parallel(questions,question=>{const {requirements,units}=scope([question]);return inspectOne(question,requirements,units)});
+    return results.flat();
   };
   const open = project.clarifications.filter(question => question.state === 'open');
   if (!open.length) return;

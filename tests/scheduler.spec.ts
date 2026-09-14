@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {AnalysisTaskScheduler,attachInitialUserInput,compactPromptInput,schedulerConcurrency} from '../electron/scheduler-v2';
 import type {AnalysisRuntime} from '../electron/runtime';
 import type {PrdProject,RuntimeConfig,SourceUnit} from '../src/types';
+import {estimateTokens} from '../electron/prompt-budget';
 
 const root=path.resolve('docs/tmp/test-run/vitest/scheduler',randomUUID());
 afterAll(()=>rm(root,{recursive:true,force:true}));
@@ -22,12 +23,24 @@ function runtime(prompts:string[]):AnalysisRuntime{return{start:async()=>{},stop
   throw new Error(`未处理节点：${prompt.slice(0,80)}`);
 }}}
 
-describe('Pipeline 19 调度不变量',()=>{
+describe('Pipeline 20 调度不变量',()=>{
   it('默认并发为五任务、每任务十节点',()=>{expect(schedulerConcurrency({maxParallel:5,maxNodeParallel:10})).toEqual({taskLimit:5,nodeLimit:10,slotLimit:50})});
   it('提示输入裁剪保留业务字段并移除显示元数据',()=>{expect(compactPromptInput({id:'S1',excerpt:'要求',location:'第1段',label:'标题'})).toMatchObject({id:'S1',excerpt:'要求'})});
   it('首次分析说明按原话拆成用户来源且重复恢复不会重复添加',()=>{const value=project();value.analysisInput={text:'本期只做查询；\n同名按完全一致处理。\n是否需要自动合并？',revision:1,submittedAt:'2026-09-13T10:00:00.000Z',operationId:'OP-1',fingerprint:'abcdef1234567890'};attachInitialUserInput(value);attachInitialUserInput(value);const added=value.sourceUnits.filter(unit=>unit.synthetic);expect(added.map(unit=>unit.excerpt)).toEqual(['本期只做查询；','同名按完全一致处理。','是否需要自动合并？']);expect(added.every(unit=>unit.location.startsWith('用户补充 · 本次分析'))).toBe(true)});
   it('一句话包含相反范围决定时拆成可分别应用的原话单元',()=>{const value=project();value.analysisInput={text:'本期只做活动查询，活动导出本期不做。',revision:1,submittedAt:'2026-09-13T10:00:00.000Z',operationId:'OP-S',fingerprint:'scope-fingerprint'};attachInitialUserInput(value);expect(value.sourceUnits.filter(unit=>unit.synthetic).map(unit=>unit.excerpt)).toEqual(['本期只做活动查询，','活动导出本期不做。'])});
   it('首轮只核查已有产物，不调用全文补漏节点，且运行配置不落密钥',async()=>{const prompts:string[]=[],directory=path.join(root,'initial'),secret={...config,apiKey:'DO-NOT-PERSIST'};const scheduler=new AnalysisTaskScheduler(directory,async()=>secret,()=>{},()=>runtime(prompts));await scheduler.initialize();const created=await scheduler.create(project()),done=await terminal(scheduler);expect(done.status,done.error).toBe('completed');expect(prompts.some(item=>item.includes('原文正向完整性检查')||item.includes('定点补漏')||item.includes('功能候选完整性检查'))).toBe(false);expect(prompts.some(item=>item.includes('“产物依据核查”'))).toBe(true);expect(await readFile(path.join(directory,`${created.id}.json`),'utf8')).not.toContain('DO-NOT-PERSIST')});
+  it('超过旧硬上限的完整请求仍到达 Runtime 且只记录估算用量',async()=>{
+    const prompts:string[]=[],directory=path.join(root,'unlimited-prompt'),value=project(),large='中'.repeat(21000)+'。';value.rawText=large;value.sourceUnits=[{id:'S-LARGE',label:'长需求',kind:'paragraph',excerpt:large,location:'第1段',status:'processed'}];
+    const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>runtime(prompts));await scheduler.initialize();await scheduler.create(value);const done=await terminal(scheduler);
+    expect(done.status,done.error).toBe('completed');expect(prompts.some(prompt=>estimateTokens(prompt)>16000)).toBe(true);expect(done.checkpoint?.promptMetrics?.some(metric=>metric.estimatedTokens>16000)).toBe(true);expect(done.checkpoint?.promptMetrics?.every(metric=>!('targetTokens' in metric)&&!('hardTokens' in metric))).toBe(true);
+  });
+  it('audit 执行失败不生成业务问题，重试只补跑失败工作',async()=>{
+    const prompts:string[]=[],directory=path.join(root,'audit-retry'),base=runtime(prompts),auditCalls=new Map<string,number>(),value=project();value.rawText='字段 A 必填。字段 B 必填。';value.sourceUnits=[{id:'S-A',label:'A',kind:'paragraph',excerpt:'字段 A 必填。',location:'第1段',status:'processed'},{id:'S-B',label:'B',kind:'paragraph',excerpt:'字段 B 必填。',location:'第2段',status:'processed'}];
+    const unstable:AnalysisRuntime={...base,promptAndWait:async(id,prompt,options)=>{const data=input(prompt);if(prompt.includes('“功能候选识别”')){prompts.push(prompt);return JSON.stringify({features:data.sourceUnits.map((unit:SourceUnit,index:number)=>({id:`LOCAL-F${index+1}`,name:`字段${index+1}`,kind:'function',appliesToFeatureIds:[],sourceUnitIds:[unit.id],state:'draft'})),sourceDispositions:data.sourceUnits.map((unit:SourceUnit,index:number)=>({sourceUnitId:unit.id,contentRole:'requirement',reason:'明确要求',featureIds:[`LOCAL-F${index+1}`]}))})}if(prompt.includes('“产物依据核查”')){const featureId=data.feature.id as string,count=(auditCalls.get(featureId)??0)+1;auditCalls.set(featureId,count);if(featureId==='F-002'&&count===1){prompts.push(prompt);throw new Error('临时 Runtime 故障')}}return base.promptAndWait(id,prompt,options)}};
+    const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>unstable);await scheduler.initialize();const created=await scheduler.create(value),failed=await terminal(scheduler);
+    expect(failed.status).toBe('failed');expect(failed.project.audit).toBeUndefined();expect(failed.checkpoint?.auditIssues).toEqual([]);expect(failed.checkpoint?.auditWorkStates?.['F-001']).toMatchObject({state:'succeeded',attempts:1});expect(failed.checkpoint?.auditWorkStates?.['F-002']).toMatchObject({state:'failed',attempts:1,error:'临时 Runtime 故障'});expect(failed.checkpoint?.executionFailures?.at(-1)).toMatchObject({node:'audit',subjectId:'F-002',message:'临时 Runtime 故障'});
+    await scheduler.retry(created.id);const completed=await terminal(scheduler);expect(completed.status,completed.error).toBe('completed');expect(Object.fromEntries(auditCalls)).toEqual({'F-001':1,'F-002':2});expect(completed.checkpoint?.auditWorkStates?.['F-002']).toMatchObject({state:'succeeded',attempts:2});expect(completed.checkpoint?.executionFailures).toEqual([]);
+  });
   it('细化首轮多个结构错误会一次反馈并在第二轮整体纠正',async()=>{
     const prompts:string[]=[],directory=path.join(root,'detail-correction'),base=runtime(prompts);let detailAttempts=0;
     const correcting:AnalysisRuntime={...base,promptAndWait:async(id,prompt,options)=>{if(prompt.includes('“逐功能细化”')&&++detailAttempts===1){prompts.push(prompt);return JSON.stringify({requirements:[{id:'LOCAL-R1',title:'需求1',behavior:'按原文执行',conditions:['E1'],constraints:[],explicitAcceptanceEvidenceIds:[],sourceUnitIds:['S1'],state:'draft'}],clarifications:[]})}return base.promptAndWait(id,prompt,options)}};

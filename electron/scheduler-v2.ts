@@ -11,7 +11,7 @@ import { createRuntime, type AnalysisRuntime, type RuntimeImage } from './runtim
 import { buildSourceUnits, enrichSourceContext, sourceCoverage } from './source-units.js';
 import { DetailEvidenceValidationError, evidencePromptInput, materializeDetailEvidenceSelections, materializeEvidenceSelections, type DetailEvidenceIssue, type SourceEvidence } from './source-evidence.js';
 import {checksPass, closeIssue, contentFingerprint, projectInputHash, registerAuditIssues, requiredChecks} from './task-execution-state.js';
-import {assertPromptBudget,attemptTimeoutMs,budgetClassFor,estimateTokens,measurePrompt,PromptBudgetExceededError} from './prompt-budget.js';
+import {attemptTimeoutMs,budgetClassFor,measurePrompt} from './prompt-budget.js';
 
 class CandidateClassificationError extends Error {
   constructor(readonly issues: ReturnType<typeof acceptCandidateClassificationIssues>) { super('统一发现候选分类错误，需要定点重分类'); }
@@ -42,7 +42,7 @@ const repairReviewSchema = `{"originalIssueResults":[{"issueId":"输入问题ID"
 const fastNodes = new Set<ModelNodeId>(['inputInterpretation', 'featureCandidates', 'detailsFast']);
 const sourceClassificationContract = '统一来源分类契约：仅数量统计或章节索引、未表达具体业务行为的摘要归为 context，不需要独立功能，检查不得要求为其创建功能，统一不得因其未独立成项重复反馈。摘要若包含正文未展开的具体业务要求，必须保留并关联实际功能；不能因位于摘要就丢弃。文档记法和纯表头归为 context；标题或摘要明确的新增模块、字段重命名等业务要求必须保留。';
 const nodeStep: Record<ModelNodeId, number> = { imageReading: 0, inputInterpretation:0, featureCandidates: 1, featureCandidateRepair: 1, featureGlobal: 2, detailsFast: 3, details: 3, audit: 4, repair: 5 };
-export const CURRENT_PIPELINE_VERSION = 19;
+export const CURRENT_PIPELINE_VERSION = 20;
 
 function parseObject(value: string) {
   return JSON.parse(value.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()) as Record<string, unknown>;
@@ -107,12 +107,11 @@ function nodeConfig(config: RuntimeConfig, node: ModelNodeId): RuntimeConfig {
   const p = config.nodeProfiles?.[node];
   return { ...config, model: p?.model ?? (fastNodes.has(node) ? config.fastModel ?? config.model : config.model), reasoningEffort: p?.reasoningEffort ?? (fastNodes.has(node) ? config.fastReasoningEffort ?? 'low' : config.reasoningEffort) };
 }
-function batches(units: SourceUnit[], maxUnits = 24, maxTokens = 5000) {
-  const result: SourceUnit[][] = []; let current: SourceUnit[] = [], size = 0;
+function batches(units: SourceUnit[], maxUnits = 24) {
+  const result: SourceUnit[][] = []; let current: SourceUnit[] = [];
   for (const unit of units) {
-    const tokens = estimateTokens(JSON.stringify(unit));
-    if (current.length && (current[0].fileId !== unit.fileId || current.length >= maxUnits || size + tokens > maxTokens)) { result.push(current); current = []; size = 0; }
-    current.push(unit); size += tokens;
+    if (current.length && (current[0].fileId !== unit.fileId || current.length >= maxUnits)) { result.push(current); current = []; }
+    current.push(unit);
   }
   if (current.length) result.push(current);
   return result;
@@ -327,7 +326,7 @@ export class AnalysisTaskScheduler {
         const built=prompt('生成阻塞事项建议方案','只为输入中的阻塞事项生成可供需求负责人采纳的建议方案，不修改需求、不关闭事项。建议必须基于 evidence，不能只写“请确认/请补充”，不能声称行业惯例。每项输出 recommendation、rationale、impact、confirmation、alternatives（最多2项）、evidenceIds。输出 {"proposals":[{"clarificationId":"Q-0001","recommendation":"...","rationale":"...","impact":"...","confirmation":"...","alternatives":[],"evidenceIds":["S-001"]}]}。',{clarifications:batch.map(({id,question,knownFacts,unresolvedPoint,impact,sourceRefs})=>({id,question,knownFacts,unresolvedPoint,impact,evidenceIds:(sourceRefs??[]).map(ref=>ref.sourceUnitId)})),evidence}),queuedAt=Date.now(),sessionId=`prd-${task.id}-proposal-${index/6+1}`;
         await this.acquire();
         try{
-          const proposals=await this.ask(runtime,sessionId,built.text,value=>{if(!Array.isArray(value.proposals))throw new Error('建议方案响应缺少 proposals');return value.proposals as Record<string,unknown>[]},[],()=>{if(task.archivedAt)throw new Error('任务已归档')},()=>attemptTimeoutMs(),async(validationAttempt,current)=>{const startedAt=Date.now(),measurement=measurePrompt(current,'repair',validationAttempt===1?built.sections:{request:current});assertPromptBudget(measurement);(task.checkpoint!.promptMetrics??=[]).push({sessionId:`${sessionId}-try${validationAttempt}`,attempt:validationAttempt,node:'repair',purpose:'resolution-proposal',queuedAt,startedAt,queueMs:validationAttempt===1?startedAt-queuedAt:0,requestHash:createHash('sha256').update(current).digest('hex'),...measurement});task.proposalGeneration!.calls++;await this.publish(task)});
+          const proposals=await this.ask(runtime,sessionId,built.text,value=>{if(!Array.isArray(value.proposals))throw new Error('建议方案响应缺少 proposals');return value.proposals as Record<string,unknown>[]},[],()=>{if(task.archivedAt)throw new Error('任务已归档')},()=>attemptTimeoutMs(),async(validationAttempt,current)=>{const startedAt=Date.now(),measurement=measurePrompt(current,'repair',validationAttempt===1?built.sections:{request:current});(task.checkpoint!.promptMetrics??=[]).push({sessionId:`${sessionId}-try${validationAttempt}`,attempt:validationAttempt,node:'repair',purpose:'resolution-proposal',queuedAt,startedAt,queueMs:validationAttempt===1?startedAt-queuedAt:0,requestHash:createHash('sha256').update(current).digest('hex'),...measurement});task.proposalGeneration!.calls++;await this.publish(task)});
           const byId=new Map(proposals.map(value=>[value.clarificationId,value]));
           for(const target of batch){const value=byId.get(target.id);if(!value)throw new Error(`建议方案缺少 ${target.id}`);const evidenceIds=Array.isArray(value.evidenceIds)?value.evidenceIds.filter((id):id is string=>typeof id==='string'):[],allowed=new Set((target.sourceRefs??[]).map(ref=>ref.sourceUnitId));if(!evidenceIds.length||evidenceIds.some(id=>!allowed.has(id)))throw new Error(`${target.id} 的建议依据无效`);const required=(key:string)=>{const text=value[key];if(typeof text!=='string'||!text.trim())throw new Error(`${target.id}.${key} 缺失`);return text.trim()},recommendation=required('recommendation');if(recommendation.length<12||/请.{0,6}(确认|决定|补充)[。.]?$/.test(recommendation))throw new Error(`${target.id} 没有给出具体建议`);generated.set(target.id,{recommendation,rationale:required('rationale'),impact:required('impact'),confirmation:required('confirmation'),alternatives:Array.isArray(value.alternatives)?value.alternatives.filter((item):item is string=>typeof item==='string'&&!!item.trim()).slice(0,2):[],sourceRefs:evidenceIds.map(sourceUnitId=>({sourceUnitId}))})}
         }finally{this.release()}
@@ -455,7 +454,7 @@ export class AnalysisTaskScheduler {
         const evidence = preparedEvidence?{input,catalog:[]} : evidencePromptInput(input),built=prompt(title,instruction,evidence.input),budgetClass=budgetClassFor(node,purpose);
         const sessionId=`${session}-${purpose}-${sequence}`;
         let result:T;
-        try { result = await this.ask(await runtimeFor(node), sessionId, built.text, value => accept(preparedEvidence?value:materialize(value, evidence.catalog)), images, () => this.assert(task, attempt),()=>attemptTimeoutMs(),async(validationAttempt,current)=>{const startedAt=Date.now(),measurement=measurePrompt(current,budgetClass,validationAttempt===1?built.sections:{request:current});assertPromptBudget(measurement);(cp.promptMetrics??=[]).push({sessionId:`${sessionId}-try${validationAttempt}`,attempt:validationAttempt,node,purpose,queuedAt,startedAt,queueMs:validationAttempt===1?startedAt-queuedAt:0,requestHash:createHash('sha256').update(current).digest('hex'),...measurement});await checkpoint()}, async (validationAttempt,response,message,issues)=>{
+        try { result = await this.ask(await runtimeFor(node), sessionId, built.text, value => accept(preparedEvidence?value:materialize(value, evidence.catalog)), images, () => this.assert(task, attempt),()=>attemptTimeoutMs(),async(validationAttempt,current)=>{const startedAt=Date.now(),measurement=measurePrompt(current,budgetClass,validationAttempt===1?built.sections:{request:current});(cp.promptMetrics??=[]).push({sessionId:`${sessionId}-try${validationAttempt}`,attempt:validationAttempt,node,purpose,queuedAt,startedAt,queueMs:validationAttempt===1?startedAt-queuedAt:0,requestHash:createHash('sha256').update(current).digest('hex'),...measurement});await checkpoint()}, async (validationAttempt,response,message,issues)=>{
           const directory=path.join(workspace,'diagnostics');await mkdir(directory,{recursive:true});const responsePath=path.join(directory,`${sessionId}-try${validationAttempt}.json`);
           await writeFile(responsePath,JSON.stringify({sessionId,node,purpose,message,issues,response,requestHash:createHash('sha256').update(JSON.stringify(evidence.input)).digest('hex'),at:Date.now()},null,2),'utf8');
           (cp.validationFailures??=[]).push({sessionId,node,purpose,message,issues,responsePath,at:Date.now()});await checkpoint();
@@ -658,7 +657,7 @@ export class AnalysisTaskScheduler {
           const applicableConstraints=task.project.features.filter(item=>item.kind==='constraint'&&item.appliesToFeatureIds?.includes(feature.id));
           const units=sourceUnits([...feature.sourceUnitIds,...applicableConstraints.flatMap(item=>item.sourceUnitIds)]),instruction=`忠实细化当前功能及适用约束，只整理原文明示内容。一个条目表达完整业务要求；同对象字段属性可合并，能分别漏做的行为才拆分。不得输出功能概述，不得补充常识、实现方案或测试。只有缺少决定业务行为所必需的信息或原文冲突时才记录问题。${clarificationContract} 每个字段的 evidenceBindings 只能选择直接支持该字段的证据。输出 ${detailSchema}`;
           const featureInput={id:feature.id,name:feature.name,kind:feature.kind},constraintInputs=applicableConstraints.map(item=>({id:item.id,name:item.name,kind:item.kind}));
-           const partials=await mapPool(batches(units,12,5000),pool,async(batch,batchIndex)=>call(detailIsComplex(feature,units)?'details':'detailsFast',`details-${feature.id}-batch${batchIndex}`,'逐功能细化',instruction,{feature:featureInput,applicableConstraints:constraintInputs,sourceUnits:batch},value=>acceptDirectDetails(value.requirements,value.clarifications,batch,true),[],false,materializeDetailEvidenceSelections));
+           const partials=await mapPool(batches(units,12),pool,async(batch,batchIndex)=>call(detailIsComplex(feature,units)?'details':'detailsFast',`details-${feature.id}-batch${batchIndex}`,'逐功能细化',instruction,{feature:featureInput,applicableConstraints:constraintInputs,sourceUnits:batch},value=>acceptDirectDetails(value.requirements,value.clarifications,batch,true),[],false,materializeDetailEvidenceSelections));
           results[feature.id]=combineDetailBatches(partials);cp.detailedFeatureIds=Object.keys(results);task.steps[3].note=`已细化 ${cp.detailedFeatureIds.length}/${task.project.features.length} 个功能`;await checkpoint();
         });
         const materialized=new Set(cp.materializedFeatureIds??[]);this.assert(task,attempt);
@@ -670,21 +669,28 @@ export class AnalysisTaskScheduler {
         await stage(4, async()=>{
           const results=cp.auditIssueBatches??=[];
           const relationResults=cp.relationBatches??=[];
-          await mapPool(task.project.features.map((feature,index)=>({feature,index})).filter(({index})=>!results[index]||!relationResults[index]),pool,async({feature,index})=>{
+          const workStates=cp.auditWorkStates??={};
+          const failures:Array<{featureId:string;message:string}>=[];
+          await mapPool(task.project.features.map((feature,index)=>({feature,index})),pool,async({feature,index})=>{
             const requirements=task.project.requirements.filter(item=>feature.requirementIds.includes(item.id));
             const requirementIds=new Set(requirements.map(item=>item.id));
             const clarifications=task.project.clarifications.filter(item=>item.affectedIds.some(id=>requirementIds.has(id)||feature.sourceUnitIds.includes(id)));
             const evidence=sourceUnits([...requirements.flatMap(item=>item.sourceUnitIds),...clarifications.flatMap(item=>[...(item.sourceRefs??[]).map(ref=>ref.sourceUnitId),...item.affectedIds.filter(id=>id.startsWith('S-'))])]);
+            const inputHash=createHash('sha256').update(JSON.stringify({feature:{id:feature.id,name:feature.name,kind:feature.kind},requirements,clarifications,evidence,requirementCatalog:task.project.requirements.map(({id,title})=>({id,title}))})).digest('hex');
+            const previous=workStates[feature.id];if(previous?.state==='succeeded'&&previous.inputHash===inputHash&&results[index]&&relationResults[index])return;
+            workStates[feature.id]={state:'running',inputHash,attempts:(previous?.inputHash===inputHash?previous.attempts:0)+1,updatedAt:Date.now()};await checkpoint();
             try{
               const checked=await call('audit',`evidence-audit-${feature.id}`,'产物依据核查',`只核查输入中已经生成的 requirements 和 clarifications 是否受到所附原文支持：检查无依据新增，是否改变必须/可选/否定含义，是否遗漏其已引用原文中的适用条件或例外，以及 clarification 是否已能由所附原文或现有需求直接回答。不得扫描或报告未被当前产物引用的原文遗漏，不得要求增加需求数量或细化颗粒度，不得创建新业务问题。问题只允许指向当前 R/Q 编号；澄清已有答案时指向该 Q 及承接答案的 R。仅当当前 evidence 明示两个已有需求之间的前置、联动或例外时返回 relations；requirementCatalog 只用于定位关系目标，不是新增需求依据。没有问题或关系返回空数组。输出 ${auditSchema}`,{sourceUnits:evidence,feature:{id:feature.id,name:feature.name,kind:feature.kind},requirements,requirementCatalog:task.project.requirements.map(({id,title})=>({id,title})),clarifications},v=>({issues:acceptDirectAuditIssues(v.issues,evidence,[feature],requirements,clarifications,task.project.relations??[]),relations:acceptRequirementRelations(v.relations??[],evidence,task.project.requirements)}));
               results[index]=checked.issues;relationResults[index]=checked.relations;
+              workStates[feature.id]={...workStates[feature.id],state:'succeeded',updatedAt:Date.now()};
+              cp.executionFailures=(cp.executionFailures??[]).filter(item=>!(item.node==='audit'&&item.subjectId===feature.id));
             }catch(error){
-              const sourceUnitIds=evidence.length?evidence.map(item=>item.id):feature.sourceUnitIds.slice(0,1);
-              results[index]=[{id:`PLATFORM-${feature.id}`,direction:'reverse',type:'产物依据核查失败',category:'unclassified',owner:'runtime-output',sourceUnitIds,affectedIds:[feature.id],detail:`${feature.name} 未完成依据核查：${error instanceof Error?error.message:String(error)}`,disposition:'open'}];
-              relationResults[index]=[];
+              const message=error instanceof Error?error.message:String(error);delete results[index];delete relationResults[index];workStates[feature.id]={...workStates[feature.id],state:'failed',error:message,updatedAt:Date.now()};
+              (cp.executionFailures??=[]).push({node:'audit',purpose:`evidence-audit-${feature.id}`,subjectId:feature.id,category:error instanceof ModelOutputValidationError?'validation':'runtime',message,at:Date.now()});failures.push({featureId:feature.id,message});
             }
-            cp.auditBatchCount=results.filter(Boolean).length;task.steps[4].note=`已核查 ${cp.auditBatchCount}/${task.project.features.length} 个功能的现有产物`;await checkpoint();
+            cp.auditBatchCount=Object.values(workStates).filter(item=>item.state==='succeeded').length;task.steps[4].note=`已核查 ${cp.auditBatchCount}/${task.project.features.length} 个功能的现有产物`;await checkpoint();
           });
+          if(failures.length)throw new Error(`平台依据核查未完成：${failures.map(item=>`${item.featureId} ${item.message}`).join('；')}`);
           registerAuditIssues(cp.auditIssues,results.flat(),task.project);
           const existing=new Map((task.project.relations??[]).map(item=>[JSON.stringify([item.sourceRequirementId,item.targetRequirementId,item.kind,item.sourceRefs]),item]));
           for(const relation of relationResults.flat()){const key=JSON.stringify([relation.sourceRequirementId,relation.targetRequirementId,relation.kind,relation.sourceRefs]);if(!existing.has(key)){const added={...relation,id:nextId('REL-',[...existing.values()],4)};existing.set(key,added)}}
@@ -728,7 +734,7 @@ export class AnalysisTaskScheduler {
       }else await this.publish(task);
     } catch (error) {
       if (task.attempt !== attempt) return;
-      task.status = 'failed'; task.completedAt = Date.now(); const failure=error instanceof PromptBudgetExceededError?`平台提示词预算校验失败：${error.message}`:error instanceof ModelOutputValidationError&&error.title&&error.purpose?`平台未能完成“${error.title}”（${error.purpose}）的输出校验：${error.message}`:error instanceof Error ? error.message : String(error);task.error=task.adjustment?`${failure}；本次调整输入已保存：${task.adjustment.feedback??task.adjustment.instruction??''}`:failure;
+      task.status = 'failed'; task.completedAt = Date.now(); const failure=error instanceof ModelOutputValidationError&&error.title&&error.purpose?`平台未能完成“${error.title}”（${error.purpose}）的输出校验：${error.message}`:error instanceof Error ? error.message : String(error);task.error=task.adjustment?`${failure}；本次调整输入已保存：${task.adjustment.feedback??task.adjustment.instruction??''}`:failure;
       task.steps[error instanceof ModelOutputValidationError&&error.stepIndex!==undefined?error.stepIndex:activeStage].status = 'failed';
       for (const step of task.steps) if (step.status === 'running') step.status = 'failed';
       await this.publish(task);

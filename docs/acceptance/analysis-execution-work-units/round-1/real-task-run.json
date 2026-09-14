@@ -1,0 +1,10 @@
+{
+  "taskId": "T-77F83164",
+  "status": "failed",
+  "error": "候选重分类已达到两轮反馈上限：“判定字段空值处理口径确认”表述为待确认事项，不是已确认的业务规则；将其归为 requirement 不符合来源分类契约。",
+  "pipelineVersion": 20,
+  "progress": 28.571428571428573,
+  "auditSucceeded": 0,
+  "auditFailed": 0,
+  "promptMetrics": 43
+}

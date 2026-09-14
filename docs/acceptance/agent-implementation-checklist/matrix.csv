@@ -1,0 +1,8 @@
+case_id,case,round_1
+A01,交付包包含编码 Agent 入口和 implementation.csv,PASS
+A02,CSV 与 JSON 的本期需求 ID 和只读业务字段一致,PASS
+A03,中文标点引号多行文本及空验收条件往返不变,PASS
+A04,待处理事项与范围外依赖映射到受影响需求,PASS
+A05,初始实施与验收状态不冒充完成,PASS
+A06,包格式版本文件哈希及发布前磁盘回读有效,PASS
+A07,全量测试类型检查及生产构建通过,PASS

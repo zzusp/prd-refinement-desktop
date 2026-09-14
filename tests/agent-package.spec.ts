@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseString } from 'fast-csv';
 import type { AnalysisTask, PrdProject } from '../src/types';
 import { writeAgentPackage } from '../electron/export-agent-package';
 import { createTestWorkspace } from './test-workspace';
@@ -9,6 +10,7 @@ import { createTestWorkspace } from './test-workspace';
 const roots:string[]=[];
 afterAll(async()=>{await Promise.all(roots.map(root=>rm(root,{recursive:true,force:true})))});
 const hash=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
+const parseCsv=(value:string)=>new Promise<Record<string,string>[]>((resolve,reject)=>{const rows:Record<string,string>[]=[];parseString(value,{headers:true}).on('error',reject).on('data',(row:Record<string,string>)=>rows.push(row)).on('end',()=>resolve(rows))});
 
 function fixture(){
   const project:PrdProject={id:'P-1',name:'订单需求',sourceName:'prd.md',sourceHash:'input-hash',revision:2,importedAt:'2026-09-11T00:00:00.000Z',rawText:'提交订单。所有操作需登录。',stage:'review',sourceUnits:[
@@ -36,25 +38,45 @@ describe('Agent 交付包',()=>{
     const result=await writeAgentPackage(project,task,root,'with-open-items');
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
+    const implementation=await parseCsv(await readFile(path.join(result.directory,'implementation.csv'),'utf8'));
     expect(result.manifest.qualityState).toBe('ready');
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toContain('R-001');
     expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'Q-B',kind:'clarification',level:'blocking',impact:'会改变订单状态',evidence:[{sourceUnitId:'S-1'}]})]));
     expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'A-1',kind:'platform-issue',level:'blocking',evidence:[{sourceUnitId:'S-1'}]})]));
     expect(requirements.audit.issues.map((item:{id:string})=>item.id)).toContain('A-1');
+    expect(JSON.parse(implementation.find(item=>item.requirement_id==='R-001')!.pending_item_ids)).toEqual(expect.arrayContaining(['Q-B','A-1']));
   });
   it('从同一快照生成、回读并原子发布完整需求包',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=fixture();const assetPath=path.join(root,'原始图片.png'),asset=Buffer.from('fixture-image');await writeFile(assetPath,asset);project.sourceUnits[0].asset={path:assetPath,mimeType:'image/png',sha256:hash(asset),readStatus:'read'};const result=await writeAgentPackage(project,task,root,'delivery-1');
     expect(path.basename(result.directory)).toBe('delivery-1');expect(result.manifest.qualityState).toBe('ready');
-    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','features','manifest.json','pending.json','requirements.json','requirements.xlsx','sources']);
+    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','features','implementation.csv','manifest.json','pending.json','requirements.json','requirements.xlsx','sources']);
+    expect(result.manifest.schemaVersion).toBe(2);
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toEqual(['R-001','R-900']);expect(requirements.delivery.state).toBe('ready');
     expect(requirements.sources[0].asset.path).toBe(`sources/assets/${hash(asset)}.png`);expect(JSON.stringify(requirements)).not.toContain(assetPath);
     const feature=await readFile(path.join(result.directory,'features','F-001.md'),'utf8');
     expect(feature).toContain('用户提交订单');expect(feature).toContain('## 适用的通用约束');expect(feature).toContain('操作前校验登录状态');
     const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('(features/F-001.md)');
+    expect(readme).toContain('implementation.csv');expect(readme).toContain('implemented + passed');
+    const implementation=await parseCsv(await readFile(path.join(result.directory,'implementation.csv'),'utf8'));
+    expect(implementation.map(item=>item.requirement_id)).toEqual(['R-001','R-900']);
+    expect(implementation[0]).toMatchObject({delivery_id:'delivery-1',result_hash:result.manifest.resultHash,feature_id:'F-001',behavior:'用户提交订单',conditions:'["用户已登录"]',constraints:'["库存不足时禁止提交"]',explicit_acceptance_conditions:'["提交成功后返回订单号"]',common_requirement_ids:'["R-900"]',implementation_status:'todo',implementation_evidence:'',acceptance_status:'not_run',acceptance_evidence:'',blocker:''});
+    expect(JSON.parse(implementation[0].context_refs)).toEqual(['features/F-001.md','requirements.json#R-001']);
     for(const file of result.manifest.files){const data=await readFile(path.join(result.directory,...file.path.split('/')));expect(hash(data)).toBe(file.sha256);expect(data.length).toBe(file.size)}
     expect((await readdir(root)).some(name=>name.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('工作清单使用标准 CSV 保留中文标点、引号和多行条款',async()=>{
+    const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=fixture();
+    project.requirements[0].behavior='用户填写“名称,规格”后提交\n系统保留原始换行';
+    project.requirements[0].conditions=['状态为“启用,待审”','第二行\n仍属同一条件'];
+    project.requirements[0].explicitAcceptanceConditions=[];
+    const result=await writeAgentPackage(project,task,root,'csv-roundtrip');
+    const rows=await parseCsv(await readFile(path.join(result.directory,'implementation.csv'),'utf8'));
+    expect(rows[0].behavior).toBe(project.requirements[0].behavior);
+    expect(JSON.parse(rows[0].conditions)).toEqual(project.requirements[0].conditions);
+    expect(JSON.parse(rows[0].explicit_acceptance_conditions)).toEqual([]);
   });
 
   it('范围来自持久化需求字段，功能内可只排除部分需求',async()=>{
@@ -68,6 +90,7 @@ describe('Agent 交付包',()=>{
     const result=await writeAgentPackage(project,task,root,'scoped', {selectedFeatureIds:['F-001','F-002']});
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
+    const implementation=await parseCsv(await readFile(path.join(result.directory,'implementation.csv'),'utf8'));
     expect(result.manifest.selectedFeatureIds).toEqual(['F-001','F-002']);
     expect(result.manifest.executableFeatureIds).toEqual(['F-001','F-002']);
     expect(result.manifest.blockedFeatureIds).toEqual([]);
@@ -91,6 +114,7 @@ describe('Agent 交付包',()=>{
     const result=await writeAgentPackage(project,task,root,'dependency', {selectedFeatureIds:['F-001','F-002']});
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
+    const implementation=await parseCsv(await readFile(path.join(result.directory,'implementation.csv'),'utf8'));
     expect(result.manifest.executableFeatureIds).toEqual(['F-001']);
     expect(result.manifest.blockedFeatureIds).toEqual([]);
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toContain('R-001');
@@ -98,6 +122,7 @@ describe('Agent 交付包',()=>{
     expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'REL-1',kind:'unmet-dependency',requirementIds:['R-001','R-002']})]));
     expect(result.manifest.unmetDependencyCount).toBe(1);
     expect(result.manifest.qualityState).toBe('ready');
+    expect(JSON.parse(implementation.find(item=>item.requirement_id==='R-001')!.pending_item_ids)).toContain('REL-1');
   });
 
   it('功能级排除覆盖需求默认范围，且零本期需求明确失败',async()=>{

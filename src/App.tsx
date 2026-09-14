@@ -206,9 +206,9 @@ export function displayProgress(value: number) {
 export function artifactRefreshKey(task: AnalysisTask) {
   return `${task.id}:${task.resultVersion ?? 0}:${task.artifacts?.length ?? 0}`;
 }
-const taskStatusLabel = (task: AnalysisTask) =>
+export const taskStatusLabel = (task: AnalysisTask) =>
   task.status === "needs-attention"
-    ? "已完成"
+    ? "平台未完成"
     : {
         queued: "排队中",
         running: "执行中",
@@ -1505,8 +1505,8 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
     <section className="progress-card">
       <header>
         <div>
-          <span>{active ? "正在执行" : task.status === "failed" ? "执行已停止" : "执行已完成"}</span>
-          <h2>{active ? "Runtime 正在分析需求" : task.status === "failed" ? "Runtime 未完成本次任务" : "Runtime 已完成需求分析"}</h2>
+          <span>{active ? "正在执行" : task.status === "failed" ? "执行已停止" : task.status === "needs-attention" ? "执行已结束" : "执行已完成"}</span>
+          <h2>{active ? "Runtime 正在分析需求" : task.status === "failed" ? "Runtime 未完成本次任务" : task.status === "needs-attention" ? "正式结果需要重新处理" : "Runtime 已完成需求分析"}</h2>
         </div>
         <strong>{displayProgress(task.progress)}%</strong>
       </header>
@@ -1647,19 +1647,19 @@ function Results({
 export function ExecutionRecord({ task, now, failureAction, onRecover }: { task: AnalysisTask; now: number; failureAction?: "retry" | "restart"; onRecover?: (action: "retry" | "restart") => void }) {
   return (
     <section className="execution-record">
-      {task.error && task.status === "failed" && (
+      {task.error && (task.status === "failed" || task.status === "needs-attention") && (
         <div className="workspace-error" role="alert">
           <AlertTriangle />
           <div>
             <strong>
-              {task.status === "failed" ? "任务执行失败" : "执行需要处理"}
+              {task.status === "failed" ? "任务执行失败" : "平台未完成"}
             </strong>
             <p>{task.error}</p>
             {onRecover && !task.archivedAt && (
               <div className="failure-actions">
                 <button className="primary" disabled={!!failureAction} aria-busy={failureAction === "retry"} onClick={() => onRecover("retry")}>
                   <RotateCw />
-                  {failureAction === "retry" ? "正在继续" : "从失败处继续"}
+                  {failureAction === "retry" ? "正在继续" : task.status === "needs-attention" ? "继续处理" : "从失败处继续"}
                 </button>
                 <button className="secondary" disabled={!!failureAction} aria-busy={failureAction === "restart"} onClick={() => onRecover("restart")}>
                   {failureAction === "restart" ? "正在重新开始" : "重新开始"}

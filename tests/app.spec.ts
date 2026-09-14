@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, runtimeTiming } from '../src/App.js';
+import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
@@ -100,6 +100,19 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('当前节点输出缺少有效原文引用');
     expect(html).not.toContain('未通过');
     expect(html).not.toContain('已修复');
+  });
+
+  it('全部阶段结束后将平台未完成与执行进度分开表达',()=>{
+    const task={id:'T-1',status:'needs-attention',progress:100,error:'正式交付准入未通过',steps:[{id:'delivery',name:'生成结果',note:'已生成草稿',status:'completed'}],project:{features:[],requirements:[],sourceUnits:[]}} as unknown as AnalysisTask;
+    const html=renderToStaticMarkup(React.createElement(ExecutionRecord,{task,now:Date.now(),onRecover:()=>undefined}));
+    expect(taskStatusLabel(task)).toBe('平台未完成');
+    expect(html).toContain('平台未完成');
+    expect(html).toContain('100%');
+    expect(html).toContain('执行已结束');
+    expect(html).toContain('正式结果需要重新处理');
+    expect(html).toContain('继续处理');
+    expect(html).not.toContain('执行已完成');
+    expect(html).not.toContain('88%');
   });
 
   it('草稿存储不可用时不阻断页面',()=>{

@@ -110,5 +110,6 @@
 
 - 当前产品边界以 `docs/spec/prd-checklist-only-output.md` 为准：仅输出功能模块、需求清单和出处，不生成待处理事项、建议、主张或独立条件栏目。
 - 七阶段执行、九节点 Runtime、任务级调整、局部复核和版本记录保留。平台内部结构、引用和整理校验不进入用户结果页；真实任务执行失败仍在执行记录中显示错误与恢复操作。
+- 进度仅表示执行阶段进展：所有阶段结束后显示 100%。正式交付准入未通过时显示“平台未完成”和恢复操作，不得以固定 88% 或“已完成”表达交付质量；草稿与正式包仍由交付状态区分。
 - 旧版任务仍可只读查看全部需求；展示层从旧 `title/behavior/sourceUnitIds` 读取短标题和来源，不改写持久化数据。
 - 交付主文件为 checklist.csv，七列固定为 feature_id、feature_source、requirement_id、requirement、source_location、check_status、notes。Excel 与 JSON 同源，不生成待处理事项工作表或 pending.json。

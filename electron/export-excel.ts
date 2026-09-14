@@ -8,7 +8,8 @@ export function sourceLocation(project:PrdProject,refs:SourceRef[]):string {
  return refs.map(ref=>{const unit=project.sourceUnits.find(item=>item.id===ref.sourceUnitId);if(!unit)throw new Error(`来源不存在：${ref.sourceUnitId}`);
  const logical=unit.logicalPath??project.sourceName;
  if(!logical||logical.startsWith('/')||logical.includes('\\')||logical.split('/').some(part=>!part||part==='.'||part==='..')||logical.includes(':'))throw new Error('来源文件路径不安全');
- return `sources/files/${logical} · ${sourcePosition(unit)}${ref.start===undefined?'':` · 字符 ${ref.start}–${ref.end}`}`;
+ const position=sourcePosition(unit),relativePosition=position.startsWith(`${logical} · `)?position.slice(logical.length+3):position;
+ return `sources/files/${logical} · ${relativePosition}${ref.start===undefined?'':` · 字符 ${ref.start}–${ref.end}`}`;
  }).join('\n');
 }
 export function checklistRows(project:PrdProject):ChecklistRow[] {

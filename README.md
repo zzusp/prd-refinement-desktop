@@ -51,12 +51,11 @@
 
 平台基于同一份结果生成：
 
-- `checklist.csv`：七列检查清单，字段为 `feature_id`、`feature_source`、`requirement_id`、`requirement`、`source_location`、`check_status`、`notes`。
-- `checklist.xlsx`：同源需求清单与阅读说明。
+- `implementation.md`：按功能模块分组的实施检查清单，每条需求使用 Markdown 复选框，完成一项勾选一项。
 - `sources/files/`：本次任务冻结的原始 PRD 与补充文件；缺少原件时导出明确失败，不用提取文本或图片转录替代。
 - `requirements.json` 与按模块的 Markdown 导航：保留功能模块、需求和原文出处，供回查使用，不替代原始 PRD。
 
-把完整目录交给编码 Agent，并从包内 `README.md` 开始：先读原件，再结合目标代码仓库实现，并用清单逐项检查是否遗漏。将 CSV 复制为工作副本，逐项填写 `check_status`（`unchecked` 未核对、`checked` 已结合原文核对、`pending` 待处理）和 `notes`（备注或证据）。这些状态由使用清单的人或 Agent 填写，不等于平台已验证业务代码。
+把完整目录交给编码 Agent，并从包内 `README.md` 开始：先读原件，再结合目标代码仓库实现，并用清单逐项检查是否遗漏。将 `implementation.md` 复制为工作副本，每完成一项就把 `- [ ]` 改为 `- [x]`。勾选状态由使用清单的人或 Agent 维护，不等于平台已验证业务代码。
 
 “可以交付”表示当前范围的需求清单通过平台依据核查，不表示代码已经完成，也不代表 AI 可以证明自然语言意义上的 100% 零遗漏。
 

@@ -65,7 +65,7 @@ describe('需求细化数据契约', () => {
     ],project:{}} as AnalysisTask;
     expect(runtimeTiming(task)).toEqual({active:7000,retryWait:5000});
     const cost=renderToStaticMarkup(React.createElement(RuntimeCost,{task}));
-    expect(cost).toContain('模型活跃耗时');expect(cost).toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
+    expect(cost).toContain('模型活跃');expect(cost).toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
   });
 
   it('结果页使用一个任务级自然语言调整入口',()=>{
@@ -97,7 +97,9 @@ describe('需求细化数据契约', () => {
   it('平台校验失败保留在执行记录，不变成业务建议',()=>{
     const project={features:[],requirements:[],sourceUnits:[],audit:{issues:[{id:'A-1',owner:'runtime-output',detail:'当前节点输出缺少有效原文引用。',sourceUnitIds:[],affectedIds:[],disposition:'open'}]}} as any;
     const html=renderToStaticMarkup(React.createElement(ResultIssues,{project}));
-    expect(html).toContain('平台检查记录');
+    expect(html).toContain('清单校验明细');
+    expect(html).toContain('仅供追溯');
+    expect(html).not.toContain('平台检查记录');
     expect(html).toContain('分析结果未能通过校验');
     expect(html).toContain('当前节点输出缺少有效原文引用');
     expect(html).toContain('未通过');
@@ -150,6 +152,16 @@ describe('需求细化数据契约', () => {
     const project={requirements:[{id:'R-1',deliveryScope:'current'},{id:'R-2',deliveryScope:'excluded'}]} as any;
     expect(featureScope(project,{id:'F-1',requirementIds:['R-1','R-2']} as any).label).toBe('部分纳入（1/2）');
     expect(featureScope(project,{id:'F-2',requirementIds:['R-2'],deliveryScope:'excluded'} as any).label).toBe('本期不做');
+  });
+
+  it('旧版需求字段在全部需求中降级为只读清单而不触发白屏',()=>{
+    const legacyRequirement={id:'R-OLD',featureId:'F-1',title:'批量筛选审核任务',behavior:'支持一次输入多个数据集 ID。',sourceUnitIds:['S-1'],state:'reviewed'} as any;
+    const project={features:[{id:'F-1',name:'审核列表',sourceUnitIds:['S-1'],ruleIds:[],requirementIds:['R-OLD'],state:'reviewed'}],requirements:[legacyRequirement],sourceUnits:[{id:'S-1',excerpt:'支持一次输入多个数据集 ID。',location:'旧版.prd · 审核列表'}],clarifications:[]} as any;
+    const html=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T-OLD',resultVersion:1,project} as AnalysisTask,p:project,onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
+    expect(html).toContain('批量筛选审核任务');
+    expect(html).toContain('R-OLD');
+    expect(html).toContain('requirement-columns');
+    expect(html).not.toContain('需求内容待读取');
   });
 });
 it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{

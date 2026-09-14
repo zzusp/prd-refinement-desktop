@@ -42,6 +42,7 @@ import {
   featureTitle,
   readableContext,
   requirementSourceRefs,
+  requirementText,
   sourceExcerpt,
   sourceHeading,
   sourcePosition,
@@ -1437,51 +1438,29 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
     );
   return (
     <section className="runtime-cost-wrap">
-      <div className="runtime-cost">
-        <div>
-          <span>模型调用</span>
-          <strong>{calls.length}</strong>
-        </div>
-        <div>
-          <span>提示词估算</span>
-          <strong>{promptTokens.toLocaleString()} Token</strong>
-        </div>
-        <div>
-          <span>输入 Token</span>
-          <strong>
-            {measured ? input.toLocaleString() : "Runtime 未返回"}
-          </strong>
-        </div>
-        <div>
-          <span>缓存输入</span>
-          <strong>{measured ? cached.toLocaleString() : "—"}</strong>
-        </div>
-        <div>
-          <span>输出 Token</span>
-          <strong>{measured ? output.toLocaleString() : "—"}</strong>
-        </div>
-        <div>
-          <span>模型活跃耗时</span>
-          <strong>{elapsed(0, timing.active)}</strong>
-        </div>
-        <div>
+      <div className="runtime-cost" aria-label="运行统计">
+        <div className="runtime-time primary-time">
           <span>点击到结果</span>
           <strong>{elapsed(0, wall)}</strong>
+          <small>从提交任务到当前结果</small>
         </div>
-        <div>
-          <span>模型排队</span>
-          <strong>{elapsed(0,promptQueue)}</strong>
+        <div className="runtime-time">
+          <span>模型活跃</span>
+          <strong>{elapsed(0, timing.active)}</strong>
+          <small>并行调用合并后的活跃时段</small>
         </div>
-        <div>
-          <span>格式重试</span>
-          <strong>{validationRetries}</strong>
-        </div>
-        {timing.retryWait > 0 && (
-          <div>
-            <span>等待重试</span>
-            <strong>{elapsed(0, timing.retryWait)}</strong>
-          </div>
-        )}
+        <dl className="runtime-facts">
+          <div><dt>模型调用</dt><dd>{calls.length}</dd></div>
+          <div><dt>模型排队</dt><dd>{elapsed(0,promptQueue)}</dd></div>
+          <div><dt>格式重试</dt><dd>{validationRetries}</dd></div>
+          {timing.retryWait > 0 && <div><dt>等待重试</dt><dd>{elapsed(0, timing.retryWait)}</dd></div>}
+          <div className="prompt-total"><dt>提示词估算</dt><dd>{promptTokens.toLocaleString()} Token</dd></div>
+        </dl>
+        <dl className="runtime-tokens">
+          <div><dt>输入</dt><dd>{measured ? input.toLocaleString() : "Runtime 未返回"}</dd></div>
+          <div><dt>缓存输入</dt><dd>{measured ? cached.toLocaleString() : "—"}</dd></div>
+          <div><dt>输出</dt><dd>{measured ? output.toLocaleString() : "—"}</dd></div>
+        </dl>
       </div>
       <details>
         <summary>查看节点成本分布</summary>
@@ -1904,10 +1883,12 @@ function FeatureList({
               }}
             />
           </label>
-          <span>功能名称</span>
-          <span>原文位置</span>
-          <span>需求</span>
-          <span>本期范围</span>
+          <div className="thead-columns feature-columns">
+            <span>功能名称</span>
+            <span>原文位置</span>
+            <span>需求</span>
+            <span>本期范围</span>
+          </div>
         </div>
         {visible.length === 0 && (
           <p className="empty-result">没有匹配的功能，请调整搜索或范围筛选。</p>
@@ -1987,7 +1968,7 @@ function RequirementList({
         p.requirements.filter(
           (item) =>
             (!allowed || allowed.has(item.id)) &&
-            `${item.id}${item.text}`.includes(
+            `${item.id}${requirementText(item)}`.includes(
               q,
             ) &&
             (filter === "all" ||
@@ -2076,11 +2057,13 @@ function RequirementList({
               }}
             />
           </label>
-          <span>编号</span>
-          <span>需求明细</span>
-          <span>原文</span>
-          <span>检查状态</span>
-          <span>本期范围</span>
+          <div className="thead-columns requirement-columns">
+            <span>编号</span>
+            <span>需求明细</span>
+            <span>原文</span>
+            <span>检查状态</span>
+            <span>本期范围</span>
+          </div>
         </div>
         {visible.length === 0 && (
           <p className="empty-result">没有匹配的需求，请调整搜索或范围筛选。</p>
@@ -2093,7 +2076,7 @@ function RequirementList({
                 <input
                   type="checkbox"
                   checked={checked}
-                  aria-label={`选择 ${item.text}`}
+                  aria-label={`选择 ${requirementText(item)}`}
                   onChange={() =>
                     setSelected((current) =>
                       checked
@@ -2109,10 +2092,10 @@ function RequirementList({
               >
                 <code>{item.id}</code>
                 <span>
-                  <strong>{item.text}</strong>
+                  <strong>{requirementText(item)}</strong>
                   <small>{p.features.find(feature => feature.id === item.featureId) ? featureTitle(p, p.features.find(feature => feature.id === item.featureId)!) : '模块待定位'}</small>
                 </span>
-                <b>{item.sourceRefs.length}</b>
+                <b>{requirementSourceRefs(item).length}</b>
                 <b>
                   {item.state === "needs-clarification"
                     ? "待核查"
@@ -2271,7 +2254,7 @@ function Drawer({
       <header>
         <div>
           <code>{item.id}</code>
-          <h2>{item.text}</h2>
+          <h2>{requirementText(item)}</h2>
           <small>
             {item.state === "needs-clarification"
               ? "待核查"

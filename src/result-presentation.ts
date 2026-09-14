@@ -18,7 +18,14 @@ export function sourceExcerpt(unit: SourceUnit, ref?: SourceRef) {
 }
 
 export function requirementSourceRefs(requirement: RequirementDetail):SourceRef[] {
-  return requirement.sourceRefs;
+  const legacy = requirement as RequirementDetail & { sourceUnitIds?: string[] };
+  if (Array.isArray(requirement.sourceRefs)) return requirement.sourceRefs;
+  return (legacy.sourceUnitIds ?? []).map(sourceUnitId => ({ sourceUnitId }));
+}
+
+export function requirementText(requirement: RequirementDetail) {
+  const legacy = requirement as RequirementDetail & { title?: string; behavior?: string };
+  return requirement.text?.trim() || legacy.title?.trim() || legacy.behavior?.trim() || '需求内容待读取';
 }
 
 export function sourceHeading(unit: SourceUnit) {
@@ -51,7 +58,7 @@ export function featureTitle(project: PrdProject, feature: Feature) {
 export function affectedLabels(project: PrdProject, ids: string[]) {
   return ids.map(id => {
     const requirement = project.requirements.find(item => item.id === id);
-    if (requirement) return requirement.text;
+    if (requirement) return requirementText(requirement);
     const feature = project.features.find(item => item.id === id);
     if (feature) return featureTitle(project, feature);
     const source = project.sourceUnits.find(item => item.id === id);

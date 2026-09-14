@@ -3,7 +3,7 @@ import { ChevronRight, X } from "lucide-react";
 import type { PrdProject } from "./types";
 import { affectedLabels, issueTitle, sourceExcerpt, sourceHeading, sourcePosition } from "./result-presentation";
 
-/** 平台执行记录，业务结果仅展示功能模块和需求清单。 */
+/** 清单生成过程中的校验明细，不形成业务待办。 */
 export function ResultIssues({ project }: { project: PrdProject }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [opener, setOpener] = useState<HTMLElement>();
@@ -23,8 +23,8 @@ export function ResultIssues({ project }: { project: PrdProject }) {
   }, [selectedId, opener]);
   if (!issues.length) return null;
   return (
-    <section className="issues-workspace" aria-label="平台检查记录">
-      <header><div><h2>平台检查记录</h2><p>记录需求清单的原文核查和修正结果。</p></div></header>
+    <details className="issues-workspace validation-details">
+      <summary><span><strong>清单校验明细</strong><small>生成过程中发现并处理 {issues.length} 项内容，仅供追溯</small></span><b>{issues.some(issue => issue.disposition === 'open') ? '仍有未通过' : '已处理'}</b></summary>
       <div className="issue-list">
         {issues.map((issue) => (
           <article className="issue-row" key={issue.id}>
@@ -49,6 +49,6 @@ export function ResultIssues({ project }: { project: PrdProject }) {
           </div>
         </aside>
       )}
-    </section>
+    </details>
   );
 }

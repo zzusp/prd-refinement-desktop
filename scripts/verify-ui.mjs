@@ -14,5 +14,7 @@ if (!app.includes('网络代理') || !app.includes('proxyUrl')) violations.push(
 if (app.includes('依次验证当前配置的节点模型')) violations.push('Runtime 连接检测不应逐节点串行探测');
 if (/selectedProposalIds|generateResolutionProposals|acceptedProposals|待处理事项|建议方案/.test(app + issues)) violations.push('清单页面不应包含业务待处理事项或建议流程');
 if (!app.includes('<ResultIssues project={task.project} />')) violations.push('执行记录必须保留平台核查结果');
+if (!issues.includes('清单校验明细') || issues.includes('平台检查记录')) violations.push('执行校验必须使用折叠的清单校验明细文案');
+if (!app.includes('thead-columns requirement-columns') || !app.includes('thead-columns feature-columns')) violations.push('结果表头必须与数据行共用列轨道');
 if (violations.length) { console.error(violations.join('\n')); process.exit(1); }
 console.log('UI contract smoke check passed');

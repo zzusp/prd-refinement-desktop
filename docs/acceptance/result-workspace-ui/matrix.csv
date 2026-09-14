@@ -1,0 +1,8 @@
+case,round,status,evidence
+validation-copy-and-disclosure,1,PASS,round-1.md
+legacy-requirements-tab,1,PASS,round-1.md
+feature-checkbox-alignment,1,PASS,round-1.md
+requirement-checkbox-alignment,1,PASS,round-1.md
+runtime-cost-layout,1,PASS,round-1.md
+narrow-viewport,1,PASS,round-1.md
+automated-regression,1,PASS,round-1.md

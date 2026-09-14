@@ -2,7 +2,6 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parseString } from 'fast-csv';
 import type { AnalysisTask, PrdProject } from '../src/types';
 import { packageQuality, writeAgentPackage } from '../electron/export-agent-package';
 import { createTestWorkspace } from './test-workspace';
@@ -10,7 +9,6 @@ import { createTestWorkspace } from './test-workspace';
 const roots:string[]=[];
 afterAll(async()=>{await Promise.all(roots.map(root=>rm(root,{recursive:true,force:true})))});
 const hash=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
-const parseCsv=(value:string)=>new Promise<Record<string,string>[]>((resolve,reject)=>{const rows:Record<string,string>[]=[];parseString(value,{headers:true}).on('error',reject).on('data',(row:Record<string,string>)=>rows.push(row)).on('end',()=>resolve(rows))});
 
 async function fixture(root:string){
   const project:PrdProject={id:'P-1',name:'订单需求',sourceName:'prd.md',sourceHash:'input-hash',revision:2,importedAt:'2026-09-11T00:00:00.000Z',rawText:'提交订单。所有操作需登录。',stage:'review',sourceUnits:[
@@ -85,14 +83,14 @@ describe('Agent 交付包',()=>{
     expect(requirements).not.toHaveProperty('audit');
     expect(requirements).not.toHaveProperty('clarifications');
     expect(project.audit.issues.map(item=>item.id)).toContain('A-1');
-    expect(await readFile(path.join(result.directory,'README.md'),'utf8')).toContain('不能作为正式交付包');
+    expect(await readFile(path.join(result.directory,'README.md'),'utf8')).toContain('不应标作正式交付包');
   });
   it('从同一快照生成、回读并原子发布完整需求包',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=await fixture(root);const assetPath=path.join(root,'原始图片.png'),asset=Buffer.from('fixture-image');await writeFile(assetPath,asset);project.sourceUnits[0].asset={path:assetPath,mimeType:'image/png',sha256:hash(asset),readStatus:'read'};const result=await writeAgentPackage(project,task,root,'delivery-1');
     expect(path.basename(result.directory)).toBe('delivery-1');expect(result.manifest.qualityState).toBe('ready');
-    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','checklist.csv','checklist.xlsx','features','manifest.json','requirements.json','sources']);
-    expect(result.manifest.schemaVersion).toBe(4);
+    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','features','implementation.md','manifest.json','requirements.json','sources']);
+    expect(result.manifest.schemaVersion).toBe(5);
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toEqual(['R-001','R-900']);expect(requirements.delivery.state).toBe('ready');
     expect(requirements.sources[0].asset.path).toBe(`sources/assets/${hash(asset)}.png`);expect(JSON.stringify(requirements)).not.toContain(assetPath);
@@ -100,23 +98,27 @@ describe('Agent 交付包',()=>{
     expect(feature).toContain('用户提交订单');expect(feature).not.toContain('## 适用的通用约束');
     expect(await readFile(path.join(result.directory,'features','F-900.md'),'utf8')).toContain('操作前校验登录状态');
     const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('(features/F-001.md)');
-    expect(readme).toContain('checklist.csv');expect(readme).toContain('先完整阅读');
-    const implementation=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
-    expect(implementation.map(item=>item.requirement_id)).toEqual(['R-001','R-900']);
-    expect(implementation[0]).toMatchObject({feature_id:'F-001',requirement:'用户提交订单',check_status:'unchecked',notes:''});
-    expect(Object.keys(implementation[0])).toEqual(['feature_id','feature_source','requirement_id','requirement','source_location','check_status','notes']);
-    expect(implementation[0].source_location).toContain('sources/files/prd.md');
+    expect(readme).toContain('implementation.md');expect(readme).toContain('先完整阅读');
+    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    expect(implementation).toContain('## F-001 提交订单');
+    expect(implementation).toContain('- [ ] R-001：用户提交订单');
+    expect(implementation).toContain('- [ ] R-900：操作前校验登录状态');
+    expect(implementation).toContain('  - 原文：sources/files/prd.md');
+    expect(implementation.match(/^- \[ \] R-/gm)).toHaveLength(2);
     expect(await readFile(path.join(result.directory,'sources','files','prd.md'),'utf8')).toBe(project.rawText);
     for(const file of result.manifest.files){const data=await readFile(path.join(result.directory,...file.path.split('/')));expect(hash(data)).toBe(file.sha256);expect(data.length).toBe(file.size)}
     expect((await readdir(root)).some(name=>name.endsWith('.tmp'))).toBe(false);
   });
 
-  it('工作清单使用标准 CSV 保留中文标点、引号和多行条款',async()=>{
+  it('Markdown 工作清单保留中文标点和多行条款且每条需求只有一个复选框',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
-    project.requirements[0].text='用户填写“名称,规格”后提交\n系统保留原始换行';
-    const result=await writeAgentPackage(project,task,root,'csv-roundtrip');
-    const rows=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
-    expect(rows[0].requirement).toBe(project.requirements[0].text);
+    const legacy=project.requirements[0] as typeof project.requirements[0]&{title?:string;sourceUnitIds?:string[]};
+    legacy.title='用户填写“名称,规格”后提交\n系统保留原始换行';legacy.sourceUnitIds=['S-1'];
+    delete legacy.text;delete legacy.featureId;delete legacy.sourceRefs;
+    const result=await writeAgentPackage(project,task,root,'markdown-roundtrip');
+    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    expect(implementation).toContain('- [ ] R-001：用户填写“名称,规格”后提交<br>系统保留原始换行');
+    expect(implementation.match(/^- \[ \] R-001：/gm)).toHaveLength(1);
   });
 
   it('范围来自持久化需求字段，功能内可只排除部分需求',async()=>{
@@ -135,9 +137,10 @@ describe('Agent 交付包',()=>{
     expect(await readdir(result.directory)).not.toContain('pending.json');
     expect(await readdir(path.join(result.directory,'features'))).toEqual(expect.arrayContaining(['F-001.md','F-900.md']));
     expect(await readdir(path.join(result.directory,'features'))).toContain('F-002.md');
-    const workbook=new (await import('exceljs')).default.Workbook();await workbook.xlsx.readFile(path.join(result.directory,'checklist.xlsx'));
-    expect(workbook.getWorksheet('需求清单')?.rowCount).toBe(4);
-    expect(workbook.worksheets.map(sheet=>sheet.name)).toEqual(['需求清单','阅读说明']);
+    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    expect(implementation.match(/^- \[ \] /gm)).toHaveLength(3);
+    expect(implementation).toContain('## F-002 取消订单');
+    expect(implementation).not.toContain('R-002：');
   });
 
   it('仅输出本期模块与需求，不将历史关系转成待处理事项',async()=>{

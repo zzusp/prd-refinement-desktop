@@ -153,9 +153,8 @@ describe('直接需求域契约',()=>{
   it('当前模型流程缺少逐字段证据时拒绝需求输出',()=>{
     expect(()=>acceptDirectDetails([requirement],[],sources,true)).toThrow('evidenceBindings 缺失');
   });
-  it('没有对应字段时忽略模型照抄的空证据占位组',()=>{
-    const value=acceptDirectDetails([{...requirement,evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[[]],constraints:[[]],explicitAcceptanceConditions:[[]]}}],[],sources,true).requirements[0];
-    expect(value.evidenceBindings).toMatchObject({conditions:[],constraints:[],explicitAcceptanceConditions:[]});
+  it('没有对应字段时也拒绝多余的空证据占位组',()=>{
+    expect(()=>acceptDirectDetails([{...requirement,evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[[]],constraints:[[]],explicitAcceptanceConditions:[[]]}}],[],sources,true)).toThrow('需要 0 组，实际 1 组');
   });
   it('存在对应字段时仍严格拒绝缺失的证据组',()=>{
     expect(()=>acceptDirectDetails([{...requirement,constraints:['最多 10 条'],evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[],constraints:[],explicitAcceptanceConditions:[]}}],[],sources,true)).toThrow('需要 1 组，实际 0 组');

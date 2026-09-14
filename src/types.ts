@@ -398,11 +398,11 @@ export interface AnalysisTask {
   runtimeConfig?: RuntimeConfigSnapshot;
   attempt: number;
   checkpoint?: {
-    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18;
+    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
     clarificationResults?: { dependencyHash: string; results: Record<string, { status: 'candidate' | 'verified' | 'rejected'; value?: unknown; attempts: number; feedback?: string }> };
     resultVersion?:number;
     checks?:Partial<Record<RequiredCheckId,AnalysisCheckRecord>>;
-    validationFailures?: Array<{sessionId:string;node:ModelNodeId;purpose:string;message:string;responsePath:string;at:number}>;
+    validationFailures?: Array<{sessionId:string;node:ModelNodeId;purpose:string;message:string;issues?:Array<{code:string;path:string;expected:string;actual:string}>;responsePath:string;at:number}>;
     candidateRepairRounds?: number[];
     unificationFeedback?: Array<Array<{ sourceUnitIds: string[]; detail: string }>>;
     unificationFeedbackRounds?: number;

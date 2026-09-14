@@ -16,7 +16,7 @@ export async function reconcileRelations(context: ReconciliationContext, questio
   const inputFor=(batch:Batch)=>{
     const selected=[...new Set(batch.pairs.flatMap(pair=>[pair.left,pair.right]))].map(id=>byId.get(id)!);
     const sourceIds=new Set(selected.flatMap(q=>[...(q.sourceRefs??[]).map(ref=>ref.sourceUnitId),...q.affectedIds.filter(id=>id.startsWith('S-'))]));
-    for(const requirement of context.project.requirements)if(selected.some(q=>q.affectedIds.includes(requirement.id)))for(const id of requirement.sourceUnitIds)sourceIds.add(id);
+    for(const requirement of context.project.requirements)if(selected.some(q=>q.affectedIds.includes(requirement.id)))for(const id of requirement.sourceRefs.map(ref=>ref.sourceUnitId))sourceIds.add(id);
     return {clarifications:selected.map(describe),pairs:batch.pairs,sourceUnits:context.units(sourceIds)};
   };
   const batches:Batch[]=[];let current:Batch={pairs:[]};

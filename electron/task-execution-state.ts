@@ -12,7 +12,7 @@ export function issueIdentity(issue:AuditIssue){
 export function issueId(identityKey:string){return `A-${identityKey.slice(0,12).toUpperCase()}`}
 export function projectDependencyHash(project:PrdProject,entityIds:string[],sourceIds:string[],includeCatalog=false){
   const ids=new Set(entityIds),sources=new Set(sourceIds);
-  return hash({sourceHash:project.sourceHash,revision:project.revision,sources:project.sourceUnits.filter(x=>sources.has(x.id)),features:project.features.filter(x=>ids.has(x.id)),requirements:project.requirements.filter(x=>ids.has(x.id)),clarifications:project.clarifications.filter(x=>ids.has(x.id)),relations:(project.relations??[]).filter(x=>ids.has(x.id)||ids.has(x.sourceRequirementId)||ids.has(x.targetRequirementId)),...(includeCatalog?{requirementCatalog:project.requirements.map(x=>[x.id,x.sourceUnitIds])}:{})});
+  return hash({sourceHash:project.sourceHash,revision:project.revision,sources:project.sourceUnits.filter(x=>sources.has(x.id)),features:project.features.filter(x=>ids.has(x.id)),requirements:project.requirements.filter(x=>ids.has(x.id)),clarifications:project.clarifications.filter(x=>ids.has(x.id)),relations:(project.relations??[]).filter(x=>ids.has(x.id)||ids.has(x.sourceRequirementId)||ids.has(x.targetRequirementId)),...(includeCatalog?{requirementCatalog:project.requirements.map(x=>[x.id,x.sourceRefs])}:{})});
 }
 export function registerAuditIssues(existing:AuditIssue[],incoming:AuditIssue[],project:PrdProject){
   const registry=new Map(existing.map(item=>[item.identityKey??issueIdentity(item),item]));

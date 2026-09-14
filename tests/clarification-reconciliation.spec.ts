@@ -43,7 +43,7 @@ function harness(p:PrdProject,respond:(call:Call)=>Record<string,unknown>){
 function businessFixture(exception=false){
   const units=[source('S-A','高风险订单必须二次审核。'),source('S-B','风险分数不低于80分属于高风险。'),...(exception?[source('S-C','特殊订单不再二次审核，但特殊订单的范围尚未定义。')]:[])];
   const q=question('Q1');q.affectedIds=units.map((_unit,index)=>`R${index}`);
-  const p=project([q],units);p.requirements=units.map((unit,index)=>({id:`R${index}`,title:unit.excerpt,behavior:unit.excerpt,conditions:[],constraints:[],explicitAcceptanceConditions:[],sourceUnitIds:[unit.id],ruleIds:[],state:'reviewed'}));
+  const p=project([q],units);p.requirements=units.map((unit,index)=>({id:`R${index}`,featureId:'F1',text:unit.excerpt,sourceRefs:[{sourceUnitId:unit.id,start:0,end:unit.excerpt.length}],state:'reviewed'}));
   return p;
 }
 function extracted(call:Call){return {facts:call.input.evidenceCatalog.map((e:any)=>({kind:e.text.includes('不再')?'exception':'fact',statement:e.text,evidenceIds:[e.id]}))}}

@@ -1263,7 +1263,7 @@ export function TaskFeedback({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selected = task.project.clarifications.filter(
-        (item) => selectedProposalIds.includes(item.id) && item.resolutionProposal,
+        (item) => selectedProposalIds.includes(item.id) && !item.userDecision && item.resolutionProposal,
       ),
       proposalText = selected
         .map(
@@ -2079,7 +2079,7 @@ function RequirementList({
         p.requirements.filter(
           (item) =>
             (!allowed || allowed.has(item.id)) &&
-            `${item.id}${item.title}${item.behavior}${item.conditions.join()}${item.constraints.join()}`.includes(
+            `${item.id}${item.text}`.includes(
               q,
             ) &&
             (filter === "all" ||
@@ -2170,7 +2170,7 @@ function RequirementList({
           </label>
           <span>编号</span>
           <span>需求明细</span>
-          <span>条件</span>
+          <span>原文</span>
           <span>检查状态</span>
           <span>本期范围</span>
         </div>
@@ -2185,7 +2185,7 @@ function RequirementList({
                 <input
                   type="checkbox"
                   checked={checked}
-                  aria-label={`选择 ${item.title}`}
+                  aria-label={`选择 ${item.text}`}
                   onChange={() =>
                     setSelected((current) =>
                       checked
@@ -2201,10 +2201,10 @@ function RequirementList({
               >
                 <code>{item.id}</code>
                 <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.behavior}</small>
+                  <strong>{item.text}</strong>
+                  <small>{p.features.find(feature => feature.id === item.featureId) ? featureTitle(p, p.features.find(feature => feature.id === item.featureId)!) : '模块待定位'}</small>
                 </span>
-                <b>{item.conditions.length + item.constraints.length}</b>
+                <b>{item.sourceRefs.length}</b>
                 <b>
                   {item.state === "needs-clarification"
                     ? "有待澄清项"
@@ -2363,7 +2363,7 @@ function Drawer({
       <header>
         <div>
           <code>{item.id}</code>
-          <h2>{item.title}</h2>
+          <h2>{item.text}</h2>
           <small>
             {item.state === "needs-clarification"
               ? "有待澄清项"
@@ -2377,24 +2377,6 @@ function Drawer({
         </button>
       </header>
       <div>
-        <h3>具体要求</h3>
-        <p>{item.behavior}</p>
-        <h3>条件与限制</h3>
-        {[...item.conditions, ...item.constraints].map((x) => (
-          <p className="rule" key={x}>
-            {x}
-          </p>
-        ))}
-        {item.explicitAcceptanceConditions.length > 0 && (
-          <>
-            <h3>PRD 原文明示验收条件</h3>
-            {item.explicitAcceptanceConditions.map((x) => (
-              <p className="rule" key={x}>
-                {x}
-              </p>
-            ))}
-          </>
-        )}
         <h3>原文及位置</h3>
         {requirementSourceRefs(item).map((ref, index) => {
           const source = project.sourceUnits.find(
@@ -2835,4 +2817,4 @@ function RuntimeSettings({
   );
 }
 
-export { TaskPage, featureScope };
+export { TaskPage, featureScope, RequirementList, Drawer };

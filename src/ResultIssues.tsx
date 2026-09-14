@@ -114,8 +114,8 @@ export function ResultIssues({ project, selectedProposalIds = [], onProposalSele
   const selected = items.find(
     (item) => `${item.kind}-${item.value.id}` === selectedKey,
   );
-  const selectable=visible.filter((item):item is Extract<Item,{kind:'clarification'}>=>item.kind==='clarification'&&clarificationLevel(item.value)==='blocking'&&!!item.value.resolutionProposal).map(item=>item.value.id),selectedSet=new Set(selectedProposalIds);
-  const missing=items.filter(item=>item.kind==='clarification'&&clarificationLevel(item.value)==='blocking'&&!item.value.resolutionProposal).length;
+  const selectable=visible.filter((item):item is Extract<Item,{kind:'clarification'}>=>item.kind==='clarification'&&clarificationLevel(item.value)==='blocking'&&!item.value.userDecision&&!!item.value.resolutionProposal).map(item=>item.value.id),selectedSet=new Set(selectedProposalIds);
+  const missing=items.filter(item=>item.kind==='clarification'&&clarificationLevel(item.value)==='blocking'&&!item.value.userDecision&&!item.value.resolutionProposal).length;
   const filters: Array<[Filter, string, number]> = [
     ["all", "全部", items.length],
     ["blocking", "阻塞", counts.blocking],
@@ -210,7 +210,7 @@ export function ResultIssues({ project, selectedProposalIds = [], onProposalSele
                 className="issue-row"
                 key={`${item.kind}-${item.value.id}`}
               >
-                {clarification?.resolutionProposal&&onProposalSelection?<label className="proposal-select" aria-label={`选择建议方案：${title}`}><input type="checkbox" checked={selectedSet.has(clarification.id)} onChange={event=>onProposalSelection(event.target.checked?[...selectedProposalIds,clarification.id]:selectedProposalIds.filter(id=>id!==clarification.id))}/></label>:<span className={`issue-level ${level}`}>
+                {clarification?.resolutionProposal&&!clarification.userDecision&&onProposalSelection?<label className="proposal-select" aria-label={`选择建议方案：${title}`}><input type="checkbox" checked={selectedSet.has(clarification.id)} onChange={event=>onProposalSelection(event.target.checked?[...selectedProposalIds,clarification.id]:selectedProposalIds.filter(id=>id!==clarification.id))}/></label>:<span className={`issue-level ${level}`}>
                   {item.kind === "platform"
                     ? "阻塞"
                     : clarificationLevelLabel[level]}
@@ -222,7 +222,8 @@ export function ResultIssues({ project, selectedProposalIds = [], onProposalSele
                     <b>已知：</b>
                     {facts}
                   </p>
-                  {clarification?.resolutionProposal&&<section className="resolution-proposal"><header><b><Lightbulb/>建议方案{proposalOverrides[clarification.id]&&<em>已修改</em>}</b>{editingId!==clarification.id&&onProposalOverride&&<button className="text-action" type="button" onClick={()=>{setEditingId(clarification.id);setEditingText(proposalOverrides[clarification.id]??clarification.resolutionProposal!.recommendation)}}>修改</button>}</header>{editingId===clarification.id?<div className="proposal-editor"><textarea className="resize-none" aria-label={`修改建议方案：${title}`} rows={3} value={editingText} onChange={event=>setEditingText(event.target.value)}/><footer><button type="button" className="text-action" onClick={()=>setEditingId(undefined)}>取消</button><button type="button" className="secondary" disabled={!editingText.trim()} onClick={()=>{const value=editingText.trim(),original=clarification.resolutionProposal!.recommendation;onProposalOverride?.(clarification.id,value===original?undefined:value);if(!selectedSet.has(clarification.id))onProposalSelection?.([...selectedProposalIds,clarification.id]);setEditingId(undefined)}}>保存并加入本次调整</button></footer></div>:<p>{proposalOverrides[clarification.id]??clarification.resolutionProposal.recommendation}</p>}<small>待你采纳后才会写入需求，不会自动关闭事项。</small></section>}
+                  {clarification?.userDecision&&<p className="issue-impact"><strong>已确认，待同步 PRD：</strong>{clarification.userDecision.text}<small>确认时间：{clarification.userDecision.confirmedAt}</small></p>}
+                  {clarification?.resolutionProposal&&<section className="resolution-proposal"><header><b><Lightbulb/>建议方案{proposalOverrides[clarification.id]&&<em>已修改</em>}</b>{editingId!==clarification.id&&!clarification.userDecision&&onProposalOverride&&<button className="text-action" type="button" onClick={()=>{setEditingId(clarification.id);setEditingText(proposalOverrides[clarification.id]??clarification.resolutionProposal!.recommendation)}}>修改</button>}</header>{editingId===clarification.id?<div className="proposal-editor"><textarea className="resize-none" aria-label={`修改建议方案：${title}`} rows={3} value={editingText} onChange={event=>setEditingText(event.target.value)}/><footer><button type="button" className="text-action" onClick={()=>setEditingId(undefined)}>取消</button><button type="button" className="secondary" disabled={!editingText.trim()} onClick={()=>{const value=editingText.trim(),original=clarification.resolutionProposal!.recommendation;onProposalOverride?.(clarification.id,value===original?undefined:value);if(!selectedSet.has(clarification.id))onProposalSelection?.([...selectedProposalIds,clarification.id]);setEditingId(undefined)}}>保存并加入本次调整</button></footer></div>:<p>{proposalOverrides[clarification.id]??clarification.resolutionProposal.recommendation}</p>}<small>建议不是 PRD 事实。采纳后保留用户决定；新规则须先同步 PRD，再创建新版本。</small></section>}
                   <p>
                     <b>影响：</b>
                     {impact}
@@ -233,7 +234,7 @@ export function ResultIssues({ project, selectedProposalIds = [], onProposalSele
                     </em>
                     {item.kind === "platform"
                       ? "平台处理"
-                      : level === "blocking"
+                      : clarification?.userDecision ? "待同步 PRD" : level === "blocking"
                         ? "需要你澄清"
                         : level === "suggestion"
                           ? "建议确认"

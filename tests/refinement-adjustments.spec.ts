@@ -25,19 +25,9 @@ const detail = (
   sourceUnitId: string,
 ) => ({
   id,
-  title,
-  behavior,
-  conditions: [],
-  constraints: [],
-  explicitAcceptanceConditions: [],
-  sourceUnitIds: [sourceUnitId],
-  evidenceBindings: {
-    behavior: [{ sourceUnitId }],
-    conditions: [],
-    constraints: [],
-    explicitAcceptanceConditions: [],
-  },
-  ruleIds: [],
+  featureId: id==='R1'?'F1':id==='R2'?'F2':'F3',
+  text: behavior,
+  sourceRefs: [{ sourceUnitId,start:0,end:behavior.length+1 }],
   state: "reviewed" as const,
 });
 const project = (): PrdProject => ({
@@ -126,11 +116,8 @@ const req = (
     : input.evidenceCatalog.find((x: any) => x.text.includes(behavior));
   return {
     id: targetId,
-    title: behavior,
-    behavior: { text: behavior, evidenceIds: [chosen.id] },
-    conditions: [],
-    constraints: [],
-    explicitAcceptanceEvidenceIds: [],
+    text: behavior,
+    evidenceIds: [chosen.id],
   };
 };
 const empty = () => ({
@@ -148,6 +135,12 @@ const adapter = (
 ): AdjustmentModelAdapter => ({ generate: async (call) => call.accept(fn(call) as Record<string, unknown>) });
 
 describe("任务级自然语言批量调整", () => {
+  it('采纳新增建议即使被模型错分组织指令也不能变正式需求',async()=>{
+    const value=project(),question=value.clarifications[0];question.resolutionProposal={recommendation:'拒绝重复提交',rationale:'避免重复单据',impact:'用户需检查已有订单',confirmation:'确认拒绝重复提交',alternatives:[],sourceRefs:[{sourceUnitId:'S1',start:0,end:9}]};
+    const calls:string[]=[],engine=new RefinementAdjustmentEngine(adapter(call=>{calls.push(call.operation);if(call.operation!=='adjustmentParse')throw new Error('采纳不得触发需求改写');return{operations:[{id:'O1',quote:'拒绝重复提交',kind:'organization',instruction:'落实采纳',featureIds:['F1'],clarificationIds:['Q1']}],pending:[]}}));
+    const result=await engine.run({taskId:'T',version:1,project:value},{...request('拒绝重复提交'),acceptedProposals:[{clarificationId:'Q1',baseRecommendation:'拒绝重复提交',finalText:'拒绝重复提交'}]});
+    expect(result.project.requirements).toEqual(value.requirements);expect(result.project.sourceUnits).toEqual(value.sourceUnits);expect(calls).toEqual(['adjustmentParse']);expect(result.project.clarifications[0]).toMatchObject({state:'open',userDecision:{text:'拒绝重复提交',status:'pending-prd-sync'}});expect(result.project.userEvidence?.at(-1)).toMatchObject({kind:'clarification-answer',businessFact:false});
+  });
   it("其他功能变化也进入生成和修正的完整项目依赖哈希", async () => {
     const captured: Array<{ operation: string; input: any }> = [];
     const value = project();
@@ -158,7 +151,7 @@ describe("任务级自然语言批量调整", () => {
       return empty();
     }), () => new Date('2026-09-14T00:00:00Z'));
     await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
-    value.requirements.find(item => item.id === 'R2')!.title = '另一功能变化';
+    value.requirements.find(item => item.id === 'R2')!.text = '另一功能变化';
     await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
     const generated = captured.filter(item => item.operation === 'adjustmentGenerate').map(item => item.input);
     const repaired = captured.filter(item => item.operation === 'adjustmentRepair').map(item => item.input.originalInput);
@@ -222,13 +215,13 @@ describe("任务级自然语言批量调整", () => {
       const engine = new RefinementAdjustmentEngine(adapter(call => {
         if (call.operation === "adjustmentParse") return { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] };
         const requirement: any = req(call.input, "R1", "用户可以提交订单");
-        if (invalid === "empty-evidence") requirement.behavior.evidenceIds = [];
+        if (invalid === "empty-evidence") requirement.evidenceIds = [];
         else requirement.state = "reviewed";
         return { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement }] };
       }));
       const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
       expect(result.status).toBe("failed");
-      expect(result.error).toContain(invalid === "empty-evidence" ? "非空证据编号数组" : "state");
+      expect(result.error).toContain(invalid === "empty-evidence" ? "非空证据编号数组" : "内部字段");
       expect(result.project.requirements).toEqual(project().requirements);
     }
   });
@@ -248,9 +241,9 @@ describe("任务级自然语言批量调整", () => {
     expect(result.status).toBe("completed");
     expect(calls).toEqual(["adjustmentParse", "adjustmentGenerate", "adjustmentReview", "adjustmentRepair", "adjustmentReview"]);
     const requirement = result.project.requirements.find(item => item.id === "R1")!;
-    expect(requirement.behavior).toBe("用户可以提交订单");
-    expect(requirement.sourceUnitIds).toEqual(["S1"]);
-    expect(requirement.evidenceBindings?.behavior[0]).toMatchObject({ sourceUnitId: "S1", start: 0 });
+    expect(requirement.text).toBe("用户可以提交订单");
+    expect(requirement.sourceRefs.map(ref=>ref.sourceUnitId)).toEqual(["S1"]);
+    expect(requirement.sourceRefs[0]).toMatchObject({ sourceUnitId: "S1", start: 0 });
   });
 
   it("跨两功能只处理命中范围，同一功能的多条意见只生成一次", async () => {
@@ -344,13 +337,13 @@ describe("任务级自然语言批量调整", () => {
     );
     expect(run.userEvidence.map((x) => [x.content, x.businessFact])).toEqual([
       ["提交订单写得更简洁", false],
-      ["提交订单允许重复提交", true],
+      ["提交订单允许重复提交", false],
     ]);
     expect(
       run.project.sourceUnits
         .filter((x) => x.id.startsWith("USER-"))
         .map((x) => x.excerpt),
-    ).toEqual(["提交订单允许重复提交"]);
+    ).toEqual([]);
   });
 
   it("歧义只形成待确认，不修改项目", async () => {
@@ -393,7 +386,7 @@ describe("任务级自然语言批量调整", () => {
     });
   });
 
-  it("一个答案可关闭多个明确关联澄清，defer 的问题保持 open", async () => {
+  it("新增决定保存在多个关联澄清中等待同步PRD，defer 保持 open", async () => {
     const feedback =
       "提交订单允许重复提交且提交后要通知；取消原因问题暂不处理。";
     const engine = new RefinementAdjustmentEngine(
@@ -469,10 +462,10 @@ describe("任务级自然语言批量调整", () => {
       request(feedback),
     );
     expect(run.project.clarifications.find((x) => x.id === "Q1")?.state).toBe(
-      "resolved",
+      "open",
     );
     expect(run.project.clarifications.find((x) => x.id === "Q2")?.state).toBe(
-      "resolved",
+      "open",
     );
     expect(run.project.clarifications.find((x) => x.id === "Q3")?.state).toBe(
       "open",
@@ -516,7 +509,7 @@ describe("任务级自然语言批量调整", () => {
           throw new Error("取消功能生成失败");
         const input = call.input as any;
         const changed = req(input, "R1", "用户可以提交订单");
-        changed.title = "精简提交";
+        changed.text = "精简提交";
         return {
           requirementActions: [
             { action: "update", targetId: "R1", requirement: changed },
@@ -531,8 +524,8 @@ describe("任务级自然语言批量调整", () => {
       request(feedback),
     );
     expect(run.status).toBe("failed");
-    expect(run.project.requirements.find((x) => x.id === "R1")?.title).toBe(
-      "提交",
+    expect(run.project.requirements.find((x) => x.id === "R1")?.text).toBe(
+      "用户可以提交订单",
     );
     expect(run.diff.updatedFeatureIds).toEqual([]);
     expect(run.results.filter((x) => x.status === "failed")).toHaveLength(2);
@@ -570,7 +563,7 @@ describe("任务级自然语言批量调整", () => {
           throw new Error("取消功能生成失败");
         const input = call.input as any;
         const changed = req(input, "R1", "用户可以提交订单");
-        changed.title = "精简提交";
+        changed.text = "精简提交";
         return {
           requirementActions: [
             { action: "update", targetId: "R1", requirement: changed },
@@ -585,7 +578,7 @@ describe("任务级自然语言批量调整", () => {
       request(feedback),
     );
     expect(run.status).toBe("completed");
-    expect(run.project.requirements.find((x) => x.id === "R1")?.title).toBe(
+    expect(run.project.requirements.find((x) => x.id === "R1")?.text).toBe(
       "精简提交",
     );
     expect(run.results.find((x) => x.operationId === "O1")?.status).toBe(

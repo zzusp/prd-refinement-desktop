@@ -114,7 +114,7 @@ const featureSources = (f: Feature, p: PrdProject) =>
   new Set([
     ...f.sourceUnitIds,
     ...f.requirementIds.flatMap(
-      (id) => p.requirements.find((r) => r.id === id)?.sourceUnitIds ?? [],
+      (id) => p.requirements.find((r) => r.id === id)?.sourceRefs.map(ref=>ref.sourceUnitId) ?? [],
     ),
   ]);
 
@@ -153,15 +153,21 @@ export class RefinementAdjustmentEngine {
           !(project.userEvidence ?? []).some((old) => old.id === item.id),
       ),
     ];
-    project.sourceUnits.push(
-      ...evidence
-        .filter(
-          (item) =>
-            item.businessFact &&
-            !project.sourceUnits.some((unit) => unit.id === item.id),
-        )
-        .map((item) => this.source(item)),
-    );
+    const acceptedIds=new Set((request.acceptedProposals??[]).map(item=>item.clarificationId));
+    for(const accepted of request.acceptedProposals??[]){
+      const question=project.clarifications.find(item=>item.id===accepted.clarificationId);
+      if(!question||question.resolutionProposal?.recommendation!==accepted.baseRecommendation)throw new Error('建议方案已更新，请重新确认');
+      const confirmedAt=this.now().toISOString(),operationId=request.operationId??`accepted-${version}-${question.id}`;
+      question.userDecision={text:accepted.finalText,confirmedAt,status:'pending-prd-sync',operationId};question.state='open';
+      const history={id:`DECISION-${version}-${digest([question.id,accepted.finalText])}`,author:'user' as const,kind:'clarification-answer' as const,content:accepted.finalText,createdAt:confirmedAt,appliesTo:{scope:'feature' as const,featureIds:project.features.filter(feature=>question.affectedIds.some(id=>feature.requirementIds.includes(id)||feature.sourceUnitIds.includes(id))).map(feature=>feature.id),clarificationIds:[question.id]},version,businessFact:false};
+      project.userEvidence.push(history);evidence.push(history);
+      results.push({operationId,status:'needs-confirmation',featureIds:history.appliesTo.featureIds??[],clarificationIds:[question.id],detail:'已确认，待同步 PRD；正式需求保持不变'});
+    }
+    // 用户明确决定作为处理历史保存，不能提升为冻结 PRD 来源。
+    for(const operation of plan.operations.filter(item=>item.kind==='business-fact'||item.kind==='replace-fact')){
+      for(const id of operation.clarificationIds.filter(id=>!acceptedIds.has(id))){const question=project.clarifications.find(item=>item.id===id);if(question){question.userDecision={text:operation.quote,confirmedAt:this.now().toISOString(),status:'pending-prd-sync',operationId:operation.id};question.state='open'}}
+      results.push({operationId:operation.id,status:'needs-confirmation',featureIds:operation.featureIds,clarificationIds:operation.clarificationIds,detail:'已确认，待同步 PRD；正式需求保持不变'});
+    }
     for (const p of plan.pending)
       results.push({
         operationId: p.id,
@@ -184,7 +190,7 @@ export class RefinementAdjustmentEngine {
             : "该意见是问题，未作为业务决定执行",
       });
     const actionable = plan.operations.filter((x) =>
-      ["organization", "business-fact", "replace-fact"].includes(x.kind),
+      x.kind === "organization"&&!x.clarificationIds.some(id=>acceptedIds.has(id))&&!(request.acceptedProposals??[]).some(item=>x.quote.includes(item.finalText)||item.finalText.includes(x.quote)),
     );
     const components: FeedbackOperation[][] = [];
     for (const operation of actionable) {
@@ -283,7 +289,7 @@ export class RefinementAdjustmentEngine {
         operation: "adjustmentParse",
         title: "解析任务调整说明",
         instruction:
-          '拆分用户意见。quote 必须逐字来自 feedback。organization 只是整理/粒度指令；business-fact 是明确业务口径；replace-fact 是明确替换旧口径；defer 是暂不处理；question 是询问。按功能、需求正文和澄清定位明确目标。acceptedProposals 中的 finalText 是用户实际采纳的业务决定，baseRecommendation 只用于版本校验；如果 feedback 另有明确例外或替换口径，以用户补充口径为准，不得同时生成冲突操作。存在多个合理候选、冲突或缺少决定时不得猜，写入 pending。输出 {"operations":[{"id":"O1","quote":"原文片段","kind":"organization|business-fact|replace-fact|defer|question","instruction":"执行意图","featureIds":[],"clarificationIds":[],"atomicGroupId":"可选"}],"pending":[{"id":"P1","quote":"原文片段","question":"具体待确认问题","candidateFeatureIds":[],"candidateClarificationIds":[]}]}。',
+          '拆分用户意见。quote 必须逐字来自 feedback。organization 只是整理/粒度指令；business-fact 是用户新增业务意图，仅保存待同步PRD的决定；replace-fact 同样不得覆盖PRD；defer 是暂不处理；question 是询问。按功能、需求正文和澄清定位明确目标。acceptedProposals 中的 finalText 是用户实际采纳的业务决定，baseRecommendation 只用于版本校验；如果 feedback 另有明确例外或替换口径，以用户补充口径为准，不得同时生成冲突操作。acceptedProposals 必须归为 business-fact/replace-fact，不得伪装 organization 进入正式需求。存在多个合理候选、冲突或缺少决定时不得猜，写入 pending。输出 {"operations":[{"id":"O1","quote":"原文片段","kind":"organization|business-fact|replace-fact|defer|question","instruction":"执行意图","featureIds":[],"clarificationIds":[],"atomicGroupId":"可选"}],"pending":[{"id":"P1","quote":"原文片段","question":"具体待确认问题","candidateFeatureIds":[],"candidateClarificationIds":[]}]}。',
         input: {
           feedback,
           references,
@@ -293,7 +299,7 @@ export class RefinementAdjustmentEngine {
             name: f.name ?? f.id,
             requirements: project.requirements
               .filter((r) => f.requirementIds.includes(r.id))
-              .map((r) => ({ id: r.id, title: r.title, behavior: r.behavior })),
+              .map((r) => ({ id: r.id, text: r.text })),
           })),
           clarifications: project.clarifications
             .filter((q) => q.state === "open")
@@ -413,7 +419,7 @@ export class RefinementAdjustmentEngine {
         base.userEvidence?.find((x) => x.id === id) ?? {
           id,
           author: "user",
-          kind: businessFact ? "supplement" : "refinement-instruction",
+          kind: businessFact ? "clarification-answer" : "refinement-instruction",
           content: op.quote,
           createdAt: this.now().toISOString(),
           appliesTo: {
@@ -425,21 +431,10 @@ export class RefinementAdjustmentEngine {
             clarificationIds: op.clarificationIds,
           },
           version,
-          businessFact,
+          businessFact: false,
         },
       );
     });
-  }
-  private source(e: UserEvidence): SourceUnit {
-    return {
-      id: e.id,
-      label: "用户补充",
-      kind: "paragraph",
-      excerpt: e.content,
-      location: `用户输入 · ${e.createdAt}`,
-      status: "processed",
-      synthetic: true,
-    };
   }
   private async applyFeature(
     project: PrdProject,
@@ -456,8 +451,7 @@ export class RefinementAdjustmentEngine {
         ops.some((op) => op.quote === e.content),
       ),
       units = [
-        ...project.sourceUnits.filter((x) => sourceIds.has(x.id)),
-        ...evidence.map((x) => this.source(x)),
+        ...project.sourceUnits.filter((x) => sourceIds.has(x.id)&&!x.synthetic&&(!x.sourceRole||x.sourceRole==='primary')),
       ],
       old = clone(
         project.requirements.filter((x) =>
@@ -484,14 +478,11 @@ export class RefinementAdjustmentEngine {
         userOpinions: ops.map((op) => ({
           operation: op,
           evidence: evidence.find((e) => e.content === op.quote),
-          notice:
-            op.kind === "organization"
-              ? "整理指令不是业务事实"
-              : "用户明确业务依据",
+          notice: "整理指令不是业务事实，只能整理主PRD已有要求",
         })),
       });
     const accept = (raw: Record<string, unknown>) => this.applyActions(
-      project, feature, questions, this.accept(raw, prepared.catalog, units), version, ops, evidence,
+      project, feature, questions, this.accept(raw, prepared.catalog, units, feature.id), version, ops, evidence,
     );
     let candidate = await this.adapter.generate({
         operation: "adjustmentGenerate",
@@ -571,12 +562,13 @@ export class RefinementAdjustmentEngine {
     );
   }
   private generationInstruction() {
-    return '一次落实 userOpinions 的全部意见。organization 只改变组织和表达，不得产生业务规则；只可引用 business-fact/replace-fact 对应用户证据。不得执行 defer/question。返回 {"requirementActions":[{"action":"create|update|delete","targetId":"update/delete 必填","requirement":"create/update 必填"}],"clarificationActions":[{"action":"create|update|keep|resolve|dismiss","targetId":"除 create 外必填","clarification":"create/update 必填","satisfiedRequirementIds":[],"resolutionEvidenceIds":[]}],"relationActions":[]}。requirement 使用 {id,title,behavior:{text,evidenceIds},conditions:[{text,evidenceIds}],constraints:[{text,evidenceIds}],explicitAcceptanceEvidenceIds:[]}；每项业务文本必须配对非空 evidenceIds。不得生成 evidenceBindings、sourceUnitIds、state 或字符位置。未返回动作的旧条目保留；只有答案被需求承接才 resolve。';
+    return '只落实 organization 的组织和粒度要求；正式需求仅引用主 PRD，用户意见不是证据。返回 {"requirementActions":[{"action":"create|update|delete","targetId":"update/delete 必填","requirement":"create/update 必填"}],"clarificationActions":[{"action":"create|update|keep|resolve|dismiss","targetId":"除 create 外必填","clarification":"create/update 必填","satisfiedRequirementIds":[],"resolutionEvidenceIds":[]}],"relationActions":[]}。requirement 使用 {id,featureId,text,evidenceIds}，text 是简短检查项并保留必要限定；不得生成详细行为、条件、约束、验收字段或拼成长规格书。未返回动作保留；仅当原 PRD 已有答案且被正式需求承接时才能 resolve，不得用用户新决定关闭。';
   }
   private accept(
     value: unknown,
     catalog: Parameters<typeof materializeEvidenceSelections>[1],
     units: SourceUnit[],
+    featureId: string,
   ): Actions {
     const proposal = obj(value, "调整模型返回");
     const rawRequirementActions = arr(proposal.requirementActions, "requirementActions");
@@ -603,7 +595,7 @@ export class RefinementAdjustmentEngine {
         requirement:
           action === "delete"
             ? undefined
-            : acceptDirectDetails(materializeDetailEvidenceSelections({ requirements: [x.requirement], clarifications: [] }, catalog).requirements, [], units, true)
+            : acceptDirectDetails(materializeDetailEvidenceSelections({ requirements: [x.requirement], clarifications: [] }, catalog, featureId).requirements, [], units, true)
                 .requirements[0],
       } as RequirementAction;
     });
@@ -708,7 +700,7 @@ export class RefinementAdjustmentEngine {
       remap = (id: string) => remaps.get(id) ?? id,
       related = new Set(questions.map((x) => x.id)),
       allowed = new Set(ops.flatMap((x) => x.clarificationIds)),
-      facts = new Set(evidence.filter((x) => x.businessFact).map((x) => x.id));
+      facts = new Set(result.sourceUnits.filter(unit=>!unit.synthetic&&(!unit.sourceRole||unit.sourceRole==='primary')).map(unit=>unit.id));
     for (const a of actions.clarificationActions) {
       if (a.action === "create") {
         const q = clone(a.clarification!);
@@ -781,19 +773,14 @@ export class RefinementAdjustmentEngine {
       throw new DomainValidationError("删除需求后存在悬空澄清引用");
     result.relations = acceptRequirementRelations(
       result.relations ?? [],
-      result.sourceUnits.concat(evidence.map((x) => this.source(x))),
+      result.sourceUnits,
       result.requirements,
     );
     const forbidden = new Set(
       evidence.filter((x) => !x.businessFact).map((x) => x.id),
     );
     for (const r of result.requirements) {
-      const refs = [
-        ...(r.evidenceBindings?.behavior ?? []),
-        ...(r.evidenceBindings?.conditions.flat() ?? []),
-        ...(r.evidenceBindings?.constraints.flat() ?? []),
-        ...(r.evidenceBindings?.explicitAcceptanceConditions.flat() ?? []),
-      ];
+      const refs = r.sourceRefs;
       if (refs.some((ref) => forbidden.has(ref.sourceUnitId)))
         throw new DomainValidationError("整理指令不能作为业务事实依据");
     }
@@ -823,7 +810,7 @@ export class RefinementAdjustmentEngine {
         operation: "adjustmentReview",
         title: `批量调整依据核查：${feature.name ?? feature.id}`,
         instruction:
-          '只核查候选已有主张是否由 PRD 或 businessFact=true 的用户意见片段支持，不寻找遗漏。关闭澄清必须准确承接答案。输出 {"passed":boolean,"issues":[],"clarificationResolutions":[{"clarificationId":"Q","status":"supported|unsupported","reason":"原因"}]}。',
+          '只核查候选已有主张是否由 主 PRD支持，不寻找遗漏。建议不是原文事实；关闭澄清必须引用PRD准确承接答案。输出 {"passed":boolean,"issues":[],"clarificationResolutions":[{"clarificationId":"Q","status":"supported|unsupported","reason":"原因"}]}。',
         input: {
           sourceUnits: units,
           beforeClarifications: before,

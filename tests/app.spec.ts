@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, runtimeTiming } from '../src/App.js';
+import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, runtimeTiming } from '../src/App.js';
 import { ResultIssues } from '../src/ResultIssues.js';
 import type { AnalysisTask } from '../src/types.js';
 
@@ -91,7 +91,7 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('会影响退款金额计算。');
     expect(html).toContain('查看依据');
     expect(html).toContain('退款金额按原订单含税实付金额计算。');
-    expect(html).toContain('待你采纳后才会写入需求');
+    expect(html).toContain('建议不是 PRD 事实');
     expect(html).toContain('选择当前列表的建议方案');
     expect(html).toContain('修改');
     expect(html).not.toContain('填写答案');
@@ -124,7 +124,7 @@ describe('需求细化数据契约', () => {
   });
 
   it('完成任务默认进入功能范围工作台并集中任务动作',()=>{
-    const requirement={id:'R-1',title:'查询订单',behavior:'按条件返回订单。',conditions:[],constraints:[],explicitAcceptanceConditions:[],sourceUnitIds:[],ruleIds:[],state:'reviewed',deliveryScope:'current'};
+    const requirement={id:'R-1',featureId:'F-1',text:'按条件返回订单。',sourceRefs:[],state:'reviewed',deliveryScope:'current'};
     const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,completedAt:2,steps:[],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
     const noop=()=>undefined,asyncNoop=async()=>undefined;
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
@@ -156,4 +156,17 @@ describe('需求细化数据契约', () => {
     expect(featureScope(project,{id:'F-1',requirementIds:['R-1','R-2']} as any).label).toBe('部分纳入（1/2）');
     expect(featureScope(project,{id:'F-2',requirementIds:['R-2'],deliveryScope:'excluded'} as any).label).toBe('本期不做');
   });
+});
+it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{
+ const item={id:'R-1',featureId:'F-1',text:'允许查询订单。',sourceRefs:[{sourceUnitId:'S-1'}],state:'reviewed'} as const;
+ const p={features:[{id:'F-1',name:'订单',requirementIds:['R-1']}],requirements:[item],sourceUnits:[{id:'S-1',excerpt:'用户登录后，可以按订单编号查询。',location:'第 10 行',logicalPath:'prd.md'}]} as any;
+ const drawer=renderToStaticMarkup(React.createElement(Drawer,{project:p,item:item as any,onClose:()=>undefined}));
+ expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');
+ const list=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T',status:'completed'} as any,p,onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
+ expect(list).toContain('订单');expect(list).toContain('允许查询订单。');expect(list).toContain('原文');
+});
+it('已确认的新规则继续显示待同步 PRD，不再作为未采纳建议勾选',()=>{
+ const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款口径？',reason:'原文未定',affectedIds:[],state:'open',userDecision:{text:'使用不含税金额',confirmedAt:'2026-09-14',status:'pending-prd-sync',operationId:'OP-1'},resolutionProposal:{recommendation:'使用含税金额',rationale:'便于对账',impact:'改变金额',confirmation:'确认口径',alternatives:[],sourceRefs:[]}}]} as any;
+ const html=renderToStaticMarkup(React.createElement(ResultIssues,{project,onProposalSelection:()=>undefined,onProposalOverride:()=>undefined}));
+ expect(html).toContain('已确认，待同步 PRD');expect(html).toContain('使用不含税金额');expect(html).toContain('使用含税金额');expect(html).not.toContain('选择建议方案：');expect(html).not.toContain('>修改</button>');
 });

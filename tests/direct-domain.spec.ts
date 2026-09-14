@@ -4,12 +4,18 @@ import type { Feature, RequirementDetail, SourceDisposition, SourceUnit } from '
 
 const sources:SourceUnit[]=['S1','S2','S3'].map(id=>({id,label:id,kind:'paragraph',excerpt:'字段 X 必填',location:id,status:'processed'}));
 const feature=(id:string,sourceUnitIds:string[],requirementIds:string[]=[]):Feature=>({id,name:id,goal:id,sourceUnitIds,requirementIds,ruleIds:[],state:'draft'});
-const requirement:RequirementDetail={id:'R1',title:'字段 X',behavior:'字段 X 必填',conditions:[],constraints:[],explicitAcceptanceConditions:[],sourceUnitIds:['S1'],ruleIds:[],state:'draft'};
+const requirement:RequirementDetail={id:'R1',featureId:'F1',text:'字段 X 必填',sourceRefs:[{sourceUnitId:'S1'}],state:'draft'};
 const dispositions:SourceDisposition[]=sources.map((unit,i)=>({sourceUnitId:unit.id,kind:i===0?'requirement':'context',reason:'原文分类',featureIds:i===0?['F1']:[]}));
 const graph=(features:Feature[],requirements:RequirementDetail[]=[requirement],ds=dispositions)=>validateDirectGraph(sources,ds,features,requirements,[]);
 const proposal={recommendation:'字段为空或仅包含空格时，统一按空值处理并执行现有必填校验。',rationale:'原文已明确该字段参与业务判断，统一归一化可避免同义输入产生不同结果。',impact:'空字符串和纯空格会被拒绝，不再作为有效值进入后续流程。',confirmation:'确认空字符串和纯空格均按空值处理。',alternatives:[],evidenceIds:['S1']};
 
 describe('直接需求域契约',()=>{
+  it('用户确认仅保留待同步口径且不能替代主 PRD 依据',()=>{
+    const q={id:'Q1',question:'待确认',reason:'未明确',affectedIds:['S2'],state:'open' as const,userDecision:{text:'新增处理决定',confirmedAt:'2026-09-14T00:00:00.000Z',status:'pending-prd-sync' as const,operationId:'OP1'}};
+    expect(validateDirectGraph(sources,dispositions,[feature('F1',['S1'],['R1'])],[requirement],[q]).uncovered).toEqual([]);
+    expect(()=>validateDirectGraph(sources,dispositions,[feature('F1',['S1'],['R1'])],[requirement],[{...q,userDecision:{...q.userDecision,confirmedAt:'bad'}}])).toThrow('确认时间');
+    expect(()=>validateDirectGraph(sources.map(s=>({...s,sourceRole:'supplement' as const})),dispositions,[feature('F1',['S1'],['R1'])],[requirement],[q])).toThrow('主 PRD');
+  });
   it('仅接受具备完整事实、影响、分级依据和原文证据的三级澄清',()=>{
     const base={id:'LOCAL-Q',question:'字段为空时系统应采用哪一种业务处理规则？',reason:'原文没有唯一口径',knownFacts:'字段参与业务判断',unresolvedPoint:'字段为空时的处理规则',impact:'会改变系统处理结果',levelReason:'需要明确开发输入',sourceRefs:[{sourceUnitId:'S1'}],affectedIds:['R1'],state:'open'};
     for(const level of ['blocking','ignorable'] as const)expect(acceptDirectClarifications([{...base,level,...(level==='blocking'?{resolutionProposal:proposal}:{})}],sources,['R1'])[0].level).toBe(level);
@@ -89,7 +95,7 @@ describe('直接需求域契约',()=>{
   it('拒绝全局重复编号、悬空引用、孤儿需求和多主归属',()=>{
     expect(()=>graph([feature('F1',['S1'],['R1'])],[requirement,{...requirement}])).toThrow('重复 ID');
     expect(()=>graph([feature('F1',['S1'],['BAD'])])).toThrow('不存在的 ID');
-    expect(()=>graph([feature('F1',['S1'])])).toThrow('没有主所属功能');
+    expect(()=>graph([feature('F1',['S1'])])).toThrow('没有一致的主所属功能');
     expect(()=>graph([feature('F1',['S1'],['R1']),feature('F2',['S1'],['R1'])])).toThrow('仅有一个主所属');
     expect(()=>graph([feature('R1',['S1'],['R1'])])).toThrow('重复 ID');
   });
@@ -106,23 +112,11 @@ describe('直接需求域契约',()=>{
     expect(validateDirectGraph(sources,ds,features,[requirement],[{id:'Q1',question:'待确认',reason:'未明确',affectedIds:['S2'],state:'open'}]).uncovered).toEqual([]);
     expect(validateDirectGraph(sources,dispositions,features,[requirement],[{id:'Q1',question:'待确认',reason:'未明确',affectedIds:['R1'],state:'open'}]).uncovered).toEqual([]);
   });
-  it('拒绝无原文依据的验收条件且不修改输入',()=>{
-    const invalid={...requirement,explicitAcceptanceConditions:['缺少 X 时显示红色提示']};
-    expect(()=>acceptDirectDetails([invalid],[],sources)).toThrow('不得推导或静默丢弃');
-    expect(invalid.explicitAcceptanceConditions).toEqual(['缺少 X 时显示红色提示']);
-    expect(acceptDirectDetails([{...requirement,explicitAcceptanceConditions:['字段 X 必填']}],[],sources).requirements[0].explicitAcceptanceConditions).toEqual(['字段 X 必填']);
-  });
-  it('将跨关联原文单元合并的验收条件无损拆回逐字片段',()=>{
-    const first='基于当时的当前版本数据检查一次；无候选或检查失败时不展示合并提醒，进入原有生成版本确认弹窗',second='移除空格并忽略字母大小写；其他字符和符号按原值比较';
-    const linked=[{...sources[0],excerpt:first},{...sources[1],excerpt:second}];
-    const combined={...requirement,sourceUnitIds:['S1','S2'],explicitAcceptanceConditions:[`${first}；${second}`]};
-    expect(acceptDirectDetails([combined],[],linked).requirements[0].explicitAcceptanceConditions).toEqual([first,second]);
-    expect(()=>acceptDirectDetails([{...combined,explicitAcceptanceConditions:[`${first}；${second}。新增推导`]}],[],linked)).toThrow('不得推导或静默丢弃');
-  });
-  it('验收条件匹配移除空格并忽略字母大小写，但不忽略其他字符',()=>{
-    const linked=[{...sources[0],excerpt:'合并后统一使用关联 ID；完成后询问是否生成版本。'}];
-    expect(acceptDirectDetails([{...requirement,explicitAcceptanceConditions:['合并后统一使用关联 id']}],[],linked).requirements[0].explicitAcceptanceConditions).toEqual(['合并后统一使用关联 id']);
-    expect(()=>acceptDirectDetails([{...requirement,explicitAcceptanceConditions:['合并后统一使用关联-ID']}],[],linked)).toThrow('不得推导或静默丢弃');
+  it('简短需求拒绝旧规格书字段和补件来源',()=>{
+    expect(acceptDirectDetails([requirement],[],sources).requirements[0]).toEqual(requirement);
+    for(const field of ['behavior','conditions','constraints','explicitAcceptanceConditions','evidenceBindings'])expect(()=>acceptDirectDetails([{...requirement,[field]:[]}],[],sources)).toThrow('旧规格书');
+    expect(()=>acceptDirectDetails([requirement],[],sources.map(s=>({...s,sourceRole:'supplement'})))).toThrow('主 PRD');
+    expect(()=>acceptDirectDetails([{...requirement,sourceRefs:[]}],[],sources)).toThrow('不得为空');
   });
   it('明确要求的来源处置会确定性补入其关联候选',()=>{
     const batch=acceptDirectFeatureBatch([{...feature('F1',['S1']),sourceUnitIds:['S1']}],[{sourceUnitId:'S1',contentRole:'requirement',reason:'正文要求',featureIds:['F1']},{sourceUnitId:'S2',contentRole:'requirement',reason:'标题要求',featureIds:['F1']},{sourceUnitId:'S3',contentRole:'context',reason:'文档结构',featureIds:['F1']}],sources);
@@ -142,21 +136,9 @@ describe('直接需求域契约',()=>{
     expect(()=>acceptDirectFeatures([{id:'LOCAL-F',name:'字段校验',sourceRefs:[{sourceUnitId:'S1',quote:'不存在'}],state:'draft'}],sources)).toThrow('不在指定原文');
     const repeated=[{...sources[0],excerpt:'字段 X 与字段 X'}];expect(()=>acceptDirectFeatures([{id:'LOCAL-F',name:'字段校验',sourceRefs:[{sourceUnitId:'S1',quote:'字段 X'}],state:'draft'}],repeated)).toThrow('不唯一');
   });
-  it('需求证据逐字段绑定且显式业务关系必须有真实两端和来源',()=>{
-    const detailed=acceptDirectDetails([{...requirement,conditions:['已登录'],evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[[{sourceUnitId:'S1'}]],constraints:[],explicitAcceptanceConditions:[]}}],[],sources).requirements[0];
-    expect(detailed.evidenceBindings?.conditions[0]).toEqual([{sourceUnitId:'S1'}]);
-    const wrapped=acceptDirectDetails([{...requirement,evidenceBindings:{behavior:{sourceRefs:[{sourceUnitId:'S1'}]},conditions:[],constraints:[],explicitAcceptanceConditions:[]}}],[],sources).requirements[0];
-    expect(wrapped.evidenceBindings?.behavior).toEqual([{sourceUnitId:'S1'}]);
-    const second={...requirement,id:'R2',sourceUnitIds:['S2']};expect(acceptRequirementRelations([{sourceRequirementId:'R1',targetRequirementId:'R2',kind:'affects',sourceRefs:[{sourceUnitId:'S1'}]}],sources,[requirement,second])).toHaveLength(1);
+  it('显式业务关系保留真实两端与原文引用',()=>{
+    const second={...requirement,id:'R2'};
+    expect(acceptRequirementRelations([{sourceRequirementId:'R1',targetRequirementId:'R2',kind:'affects',sourceRefs:[{sourceUnitId:'S1'}]}],sources,[requirement,second])).toHaveLength(1);
     expect(()=>acceptRequirementRelations([{sourceRequirementId:'R1',targetRequirementId:'R1',kind:'depends-on',sourceRefs:[{sourceUnitId:'S1'}]}],sources,[requirement])).toThrow('禁止自引用');
-  });
-  it('当前模型流程缺少逐字段证据时拒绝需求输出',()=>{
-    expect(()=>acceptDirectDetails([requirement],[],sources,true)).toThrow('evidenceBindings 缺失');
-  });
-  it('没有对应字段时也拒绝多余的空证据占位组',()=>{
-    expect(()=>acceptDirectDetails([{...requirement,evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[[]],constraints:[[]],explicitAcceptanceConditions:[[]]}}],[],sources,true)).toThrow('需要 0 组，实际 1 组');
-  });
-  it('存在对应字段时仍严格拒绝缺失的证据组',()=>{
-    expect(()=>acceptDirectDetails([{...requirement,constraints:['最多 10 条'],evidenceBindings:{behavior:[{sourceUnitId:'S1'}],conditions:[],constraints:[],explicitAcceptanceConditions:[]}}],[],sources,true)).toThrow('需要 1 组，实际 0 组');
   });
 });

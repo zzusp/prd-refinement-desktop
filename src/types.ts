@@ -78,22 +78,10 @@ export interface RequirementAudit { passed:boolean;issues:AuditIssue[] }
 
 export interface RequirementDetail {
   id: string;
-  title: string;
-  behavior: string;
-  conditions: string[];
-  constraints: string[];
-  /** 仅保留 PRD 原文明确给出的验收条件，不由平台推导测试场景。 */
-  explicitAcceptanceConditions: string[];
-  sourceUnitIds: string[];
-  evidenceBindings?: {
-    behavior: SourceRef[];
-    conditions: SourceRef[][];
-    constraints: SourceRef[][];
-    explicitAcceptanceConditions: SourceRef[][];
-  };
-  ruleIds: string[];
+  featureId: string;
+  text: string;
+  sourceRefs: SourceRef[];
   state: ReviewState;
-  /** 用户保存的本期范围；旧数据缺省为 current。 */
   deliveryScope?: 'current' | 'excluded';
 }
 
@@ -115,6 +103,7 @@ export interface Feature {
 }
 
 export interface Clarification {
+  userDecision?: {text:string;confirmedAt:string;status:'pending-prd-sync';operationId:string};
   id: string;
   question: string;
   reason: string;
@@ -403,7 +392,7 @@ export interface AnalysisTask {
   runtimeConfig?: RuntimeConfigSnapshot;
   attempt: number;
   checkpoint?: {
-    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22;
+    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26;
     nodeReceipts?: Record<string,NodeExecutionReceipt>;
     clarificationResults?: { dependencyHash: string; results: Record<string, { status: 'candidate' | 'verified' | 'rejected'; value?: unknown; attempts: number; feedback?: string }> };
     resultVersion?:number;

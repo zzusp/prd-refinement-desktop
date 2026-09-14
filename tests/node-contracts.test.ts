@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {materializeEvidenceSelections} from '../electron/source-evidence.js';
 import { nodeContracts, schemaToJson, detailOutputSchema } from '../electron/model-output-schemas.js';
 
-const requirement={id:'LOCAL-R1',title:'申请',behavior:{text:'允许申请',evidenceIds:['E1']},conditions:[],constraints:[],explicitAcceptanceEvidenceIds:[]};
+const requirement={id:'LOCAL-R1',text:'允许申请',evidenceIds:['E1']};
 const question={id:'Q1',question:'如何处理？',reason:'没有说明',knownFacts:'可以申请',unresolvedPoint:'异常处理',impact:'影响申请',levelReason:'需业务决定',affectedIds:['S1'],evidenceIds:['E1']};
 describe('类型化节点领域契约',()=>{
  it('所有节点均有输入、候选、正式结果契约，空输入不能通过',()=>{
@@ -17,7 +17,7 @@ describe('类型化节点领域契约',()=>{
  });
  it('非空字段证据与可空的显式验收目录分别约束',()=>{
   expect(nodeContracts.details.proposal.safeParse({requirements:[requirement],clarifications:[]}).success).toBe(true);
-  expect(nodeContracts.details.proposal.safeParse({requirements:[{...requirement,behavior:{text:'允许申请',evidenceIds:[]}}],clarifications:[]}).success).toBe(false);
+  expect(nodeContracts.details.proposal.safeParse({requirements:[{...requirement,evidenceIds:[]}],clarifications:[]}).success).toBe(false);
   expect(nodeContracts.details.proposal.safeParse({requirements:[{...requirement,state:'draft'}],clarifications:[]}).success).toBe(false);
   expect(nodeContracts.details.proposal.safeParse({requirements:[{...requirement,featureId:'ignored'}],clarifications:[]}).success).toBe(false);
   expect(nodeContracts.details.input.safeParse({feature:{id:'F1',name:'申请',kind:'function'},applicableConstraints:[],sourceUnits:[]}).success).toBe(false);
@@ -53,8 +53,8 @@ describe('类型化节点领域契约',()=>{
   expect(detailOutputSchema).toEqual(schemaToJson(nodeContracts.details.proposal));
   const schema=detailOutputSchema as any;
   const item=schema.properties.requirements.items;
-  expect(item.properties.behavior.properties.evidenceIds.minItems).toBe(1);
-  expect(item.properties.explicitAcceptanceEvidenceIds.minItems).toBeUndefined();
+  expect(item.properties.evidenceIds.minItems).toBe(1);
+  expect(item.properties).not.toHaveProperty('explicitAcceptanceEvidenceIds');
  });
  it('仅对可证明互斥的判别分支将 oneOf 转为等价 anyOf',()=>{
   const schema=schemaToJson(z.discriminatedUnion('tag',[z.strictObject({tag:z.literal('a'),value:z.string()}),z.strictObject({tag:z.literal('b'),value:z.number()})]));

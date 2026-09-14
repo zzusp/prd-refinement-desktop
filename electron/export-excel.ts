@@ -1,33 +1,41 @@
 import ExcelJS from 'exceljs';
-import type { AnalysisTask, PrdProject, SourceUnit } from '../src/types.js';
-import { activePlatformIssues, affectedLabels, clarificationCounts, clarificationLevel, clarificationLevelLabel, featureTitle, issueTitle, readableContext, requirementSourceRefs, sourceExcerpt, sourceHeading, sourcePosition } from '../src/result-presentation.js';
+import type { AnalysisTask, PrdProject, SourceRef } from '../src/types.js';
+import { activePlatformIssues, affectedLabels, clarificationLevel, clarificationLevelLabel, featureTitle, sourcePosition } from '../src/result-presentation.js';
 
-function sheet(wb:ExcelJS.Workbook,name:string,headers:string[],widths:number[]){const ws=wb.addWorksheet(name,{views:[{state:'frozen',ySplit:1,xSplit:1}]});ws.addRow(headers);ws.columns.forEach((column,index)=>{column.width=widths[index]??24;column.alignment={vertical:'top',wrapText:true}});ws.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};ws.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF17324A'}};ws.getRow(1).height=28;ws.autoFilter={from:{row:1,column:1},to:{row:1,column:headers.length}};return ws}
-const requirementState=(state:string)=>state==='needs-clarification'?'有待澄清项':state==='reviewed'?'检查通过':'尚未检查';
-const sourceText=(unit:SourceUnit)=>`${sourceHeading(unit)}\n${sourcePosition(unit)}\n${readableContext(unit.context)?`${readableContext(unit.context)}\n`:''}${unit.asset?.extractedText??unit.excerpt}`;
-const sourcesText=(project:PrdProject,ids:string[])=>ids.map(id=>project.sourceUnits.find(unit=>unit.id===id)).filter((unit):unit is SourceUnit=>!!unit).map(sourceText).join('\n\n');
-const refsText=(project:PrdProject,refs:import('../src/types.js').SourceRef[])=>refs.map(ref=>{const unit=project.sourceUnits.find(item=>item.id===ref.sourceUnitId);return unit?`${sourceHeading(unit)}\n${sourcePosition(unit)}\n${readableContext(unit.context)?`${readableContext(unit.context)}\n`:''}${sourceExcerpt(unit,ref)}`:''}).filter(Boolean).join('\n\n');
-
+export const checklistColumns=['feature_id','feature_source','requirement_id','requirement','source_location','check_status','notes'] as const;
+export type ChecklistRow=Record<typeof checklistColumns[number],string>;
+export function sourceLocation(project:PrdProject,refs:SourceRef[]):string {
+ return refs.map(ref=>{const unit=project.sourceUnits.find(item=>item.id===ref.sourceUnitId);if(!unit)throw new Error(`来源不存在：${ref.sourceUnitId}`);
+ const logical=unit.logicalPath??project.sourceName;
+ if(!logical||logical.startsWith('/')||logical.includes('\\')||logical.split('/').some(part=>!part||part==='.'||part==='..')||logical.includes(':'))throw new Error('来源文件路径不安全');
+ return `sources/files/${logical} · ${sourcePosition(unit)}${ref.start===undefined?'':` · 字符 ${ref.start}–${ref.end}`}`;
+ }).join('\n');
+}
+export function checklistRows(project:PrdProject):ChecklistRow[] {
+ const ids=new Set<string>();
+ return project.requirements.map(requirement=>{
+ if(ids.has(requirement.id))throw new Error(`重复需求编号：${requirement.id}`);ids.add(requirement.id);
+ const owner=project.features.find(feature=>feature.id===requirement.featureId&&feature.requirementIds.includes(requirement.id));
+ if(!owner)throw new Error(`需求缺少功能归属：${requirement.id}`);
+ if(!requirement.sourceRefs.length)throw new Error(`需求缺少原文：${requirement.id}`);
+ return {feature_id:owner.id,feature_source:featureTitle(project,owner),requirement_id:requirement.id,requirement:requirement.text,source_location:sourceLocation(project,requirement.sourceRefs),check_status:'unchecked',notes:''};
+ });
+}
+function sheet(wb:ExcelJS.Workbook,name:string,headers:readonly string[],widths:number[]){
+ const ws=wb.addWorksheet(name,{views:[{state:'frozen',ySplit:1}]});ws.addRow([...headers]);
+ ws.columns.forEach((column,index)=>{column.width=widths[index]??32;column.alignment={vertical:'top',wrapText:true}});
+ ws.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};ws.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF17324A'}};ws.getRow(1).height=28;
+ ws.autoFilter={from:{row:1,column:1},to:{row:1,column:headers.length}};return ws;
+}
 export interface WorkbookDeliveryScope { resultVersion?:number; selectedFeatureIds:string[]; executableFeatureIds:string[]; blockedFeatureIds:string[] }
-
-export async function writeResultWorkbook(project:PrdProject,filePath:string,checkpoint?:AnalysisTask['checkpoint'],deliveryScope?:WorkbookDeliveryScope){
- const wb=new ExcelJS.Workbook();wb.creator='需求细化平台';const counts=clarificationCounts(project),platformIssues=activePlatformIssues(project);
- const summary=sheet(wb,'阅读说明与汇总',['项目','内容'],[28,100]);summary.addRows([['需求文档',project.name],['原始文件',project.sourceName],['版本',project.revision],['需求交付状态',project.delivery?.state??'unchecked'],['业务功能数量',project.features.filter(feature=>feature.kind!=='constraint').length],['跨功能约束数量',project.features.filter(feature=>feature.kind==='constraint').length],['需求明细数量',project.requirements.length],['阻塞事项',counts.blocking],['建议事项',counts.suggestion],['可忽略事项',counts.ignorable],['平台整理问题',counts.platform],['材料待处理',project.sourceUnits.filter(source=>source.status!=='processed').length],['阅读顺序','先看交付状态，再查看功能与需求；待处理事项按阻塞、建议、可忽略分级。平台整理问题由平台处理，不要求业务代为判断。'],['交付规则','有本期需求即可生成交付包；待处理事项随相关需求保留，不会自动写入确定需求，也不会因导出而关闭。'],['范围','细化定版 PRD 中的要求，保留原文明示的接口、字段、数据要求、技术约束和验收条件；不生成技术方案或测试用例。'],['完整性边界','来源遍历、关联和模型审计不能证明自然语言语义百分之百零遗漏；未解决或未检查内容必须在交付包中明确保留。']]);
- if(deliveryScope)summary.addRows([['结果版本',deliveryScope.resultVersion??'未编号'],['本次选择功能',deliveryScope.selectedFeatureIds.join('、')||'无'],['可执行功能',deliveryScope.executableFeatureIds.join('、')||'无'],['受阻功能',deliveryScope.blockedFeatureIds.join('、')||'无']]);
- if(project.materialBundle)summary.addRows([['资料包编号',project.materialBundle.id],['资料包版本',project.materialBundle.revision]]);const roles={primary:'主 PRD',supplement:'补充资料',historical:'历史资料'};for(const document of project.sourceDocuments??[])summary.addRow(['资料文件',`${document.logicalPath} · 文件版本 ${document.revision} · ${roles[document.role]}`]);
- const features=sheet(wb,'功能清单',['功能','类型','关联需求','待处理事项','状态','原文及位置','适用功能'],[38,18,35,28,18,80,40]);
- const details=sheet(wb,'需求明细',['需求编号','所属功能','标题','具体要求','适用角色与触发条件','限制与例外','原文明示验收条件','待处理事项','状态','原文及位置'],[15,38,30,65,40,40,40,30,18,80]);
- const pending=sheet(wb,'待处理事项',['事项编号','级别','事项类型','处理方','需要处理什么','已知事实','未决点或问题','影响','分级理由','暂不处理时的口径','建议方案（尚未确认）','建议依据','采纳影响','需要确认','影响内容','原文及位置','状态'],[14,12,18,14,55,50,50,55,45,55,65,55,55,50,45,80,16]);
- const checks=sheet(wb,'检查记录',['记录编号','检查结果','发现内容','处理方','影响内容','原文及位置','状态'],[15,28,65,18,45,80,20]);
- const sources=sheet(wb,'原文追踪',['标题','原文','位置','类型','处理状态','文件路径','文件版本','文件角色'],[32,90,55,16,18,45,14,18]);
- const dispositions=sheet(wb,'来源处置',['来源编号','分类','分类理由','关联功能'],[24,20,70,35]);dispositions.state='hidden';const history=sheet(wb,'审查历史',['问题编号','类型','说明','处理结果'],[15,25,80,25]);history.state='hidden';
- const related=(ids:string[])=>project.clarifications.filter(item=>item.state==='open'&&item.affectedIds.some(id=>ids.includes(id)));const ordered=[...project.requirements].sort((a,b)=>project.features.findIndex(feature=>feature.requirementIds.includes(a.id))-project.features.findIndex(feature=>feature.requirementIds.includes(b.id)));
- project.features.forEach(feature=>{const questions=related([feature.id,...feature.requirementIds,...feature.sourceUnitIds]),refs=feature.sourceRefs?.length?feature.sourceRefs:feature.sourceUnitIds.map(sourceUnitId=>({sourceUnitId}));features.addRow([featureTitle(project,feature),feature.kind==='constraint'?'跨功能约束':'业务功能',feature.requirementIds.join('、'),questions.map(item=>`${item.id} ${clarificationLevelLabel[clarificationLevel(item)]}`).join('\n'),requirementState(feature.state),refsText(project,refs),(feature.appliesToFeatureIds??[]).map(id=>{const target=project.features.find(item=>item.id===id);return target?featureTitle(project,target):'尚未定位的功能'}).join('、')])});
- ordered.forEach(requirement=>{const owner=project.features.find(feature=>feature.requirementIds.includes(requirement.id)),questions=related([requirement.id,...requirement.sourceUnitIds]);details.addRow([requirement.id,owner?featureTitle(project,owner):'功能归属待确认',requirement.title,requirement.behavior,requirement.conditions.join('\n'),requirement.constraints.join('\n'),requirement.explicitAcceptanceConditions.join('\n'),questions.map(item=>`${item.id} ${clarificationLevelLabel[clarificationLevel(item)]}`).join('\n'),requirementState(requirement.state),refsText(project,requirementSourceRefs(requirement))])});
- project.clarifications.filter(item=>item.state==='open').sort((a,b)=>['blocking','suggestion','ignorable'].indexOf(clarificationLevel(a))-['blocking','suggestion','ignorable'].indexOf(clarificationLevel(b))).forEach(item=>{const fallback=item.affectedIds.flatMap(id=>{const requirement=project.requirements.find(value=>value.id===id);return requirement?requirementSourceRefs(requirement):(id.startsWith('S-')?[{sourceUnitId:id}]:[])}),refs=[...new Map([...(item.sourceRefs??[]),...fallback].map(ref=>[JSON.stringify(ref),ref])).values()],proposal=item.resolutionProposal;pending.addRow([item.id,clarificationLevelLabel[clarificationLevel(item)],'业务澄清','需求负责人',item.question,item.knownFacts??'请查看关联原文',item.unresolvedPoint??item.reason,item.impact??item.reason,item.levelReason??'旧任务未记录分级依据',item.defaultResolution??'',proposal?.recommendation??'',proposal?.rationale??'',proposal?.impact??'',proposal?.confirmation??'',affectedLabels(project,item.affectedIds).join('\n'),refsText(project,refs),'待处理'])});
- platformIssues.forEach(issue=>pending.addRow([issue.id,'阻塞','平台整理问题','平台',issueTitle(issue),'原文已进入分析范围',issue.detail,'当前内容不能作为可靠的 Agent 输入','平台需要修正并重新检查后才能交付','','','','','',affectedLabels(project,issue.affectedIds).join('\n'),sourcesText(project,issue.sourceUnitIds),'待平台处理']));
- for(const issue of project.audit?.issues??[])checks.addRow([issue.id,issueTitle(issue),issue.detail,issue.disposition==='needs-confirmation'?'需求负责人':'平台',affectedLabels(project,issue.affectedIds).join('\n'),sourcesText(project,issue.sourceUnitIds),issue.disposition==='repaired'?'已修复':issue.disposition==='dismissed'?'有证据排除':issue.disposition==='needs-confirmation'?'已转为业务澄清':'未解决']);
- (project.sourceDispositions??[]).forEach(item=>dispositions.addRow([item.sourceUnitId,item.kind,item.reason,item.featureIds.join('、')]));project.sourceUnits.forEach(unit=>sources.addRow([sourceHeading(unit),unit.asset?.extractedText??unit.excerpt,sourcePosition(unit),unit.kind,unit.status,unit.logicalPath??project.sourceName,unit.fileRevision??project.revision,unit.sourceRole?roles[unit.sourceRole]:'主 PRD']));
- for(const repair of checkpoint?.repairs??[])history.addRow([`明细返工·${repair.featureId}`,'自动定点返工',`原问题：${repair.originalIssues.map(issue=>issue.detail).join('\n')}\n返工前：${repair.before.map(item=>`${item.id} ${item.behavior}`).join('\n')}\n候选：${repair.candidate.map(item=>`${item.id} ${item.behavior}`).join('\n')}\n${repair.reason?`拒绝原因：${repair.reason}`:`复核：${repair.verification.map(issue=>issue.detail).join('\n')||'无新增问题'}`}`,repair.status==='accepted'?'已提交':'已拒绝']);for(const repair of checkpoint?.graphRepairs??[])history.addRow([`${repair.scope==='rules'?'规则':'跨功能'}返工`,'图结构返工',`${repair.issues.map(issue=>issue.detail).join('\n')}\n变更前ID：${repair.beforeIds.join('、')}\n变更后ID：${repair.afterIds.join('、')}\n${repair.reason??''}`,repair.status==='accepted'?'已提交并重建下游':'已拒绝']);
- for(const ws of wb.worksheets){ws.eachRow((row,index)=>{if(index>1){row.eachCell(cell=>{cell.font={name:'Microsoft YaHei',size:11,...cell.font}});if(index%2===0)row.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF3F6F8'}}}});ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0};}await wb.xlsx.writeFile(filePath);return filePath;
+export async function writeResultWorkbook(project:PrdProject,filePath:string,_checkpoint?:AnalysisTask['checkpoint'],_deliveryScope?:WorkbookDeliveryScope){
+ const wb=new ExcelJS.Workbook();wb.creator='需求细化平台';
+ const checklist=sheet(wb,'需求清单',checklistColumns,[16,36,18,65,75,18,55]);
+ for(const item of checklistRows(project)){const row=checklist.addRow(checklistColumns.map(key=>item[key]));row.getCell(6).dataValidation={type:'list',allowBlank:false,formulae:['"unchecked,checked,pending"']};}
+ const pending=sheet(wb,'待处理事项',['事项编号','级别','问题','已知事实','未决点','影响','分级理由','暂不处理口径','建议方案（非 PRD 事实）','建议依据','采纳影响','需要确认','备选','关联内容','原文位置','处理状态','用户决定'],[16,14,55,50,50,50,40,40,60,50,50,45,45,45,75,24,60]);
+ for(const item of project.clarifications){const proposal=item.resolutionProposal;pending.addRow([item.id,clarificationLevelLabel[clarificationLevel(item)],item.question,item.knownFacts??'',item.unresolvedPoint??item.reason,item.impact??item.reason,item.levelReason??'',item.defaultResolution??'',proposal?.recommendation??'',proposal?.rationale??'',proposal?.impact??'',proposal?.confirmation??'',proposal?.alternatives.join('\n')??'',affectedLabels(project,item.affectedIds).join('\n'),sourceLocation(project,item.sourceRefs??[]),item.userDecision?'已确认，待同步 PRD':item.state,item.userDecision?.text??''])}
+ for(const issue of activePlatformIssues(project))pending.addRow([issue.id,'平台处理',issue.detail,'','','平台仍需处理该问题','','','','','','','',affectedLabels(project,issue.affectedIds).join('\n'),sourceLocation(project,issue.sourceUnitIds.map(sourceUnitId=>({sourceUnitId}))),issue.disposition??'open','']);
+ const readme=sheet(wb,'阅读说明',['项目','内容'],[25,100]);readme.addRows([['阅读顺序','先完整阅读 sources/files/ 内冻结的原始 PRD 及补充资料，再用需求清单逐项查漏。短清单不能替代 PRD。'],['核对状态','unchecked 未核对；checked 已结合原文核对；pending 待处理。状态不代表平台已完成业务代码验收。'],['待处理事项','建议、用户决定与 PRD 事实分开保存。新业务规则应先同步 PRD，再创建新版本分析。'],['质量边界','清单用于减少遗漏，不证明自然语言语义 100% 零遗漏。']]);
+ for(const ws of wb.worksheets){ws.eachRow((row,index)=>{if(index>1){row.eachCell(cell=>{cell.font={name:'Microsoft YaHei',size:11}});if(index%2===0)row.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF3F6F8'}}}});ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0};}
+ await wb.xlsx.writeFile(filePath);return filePath;
 }

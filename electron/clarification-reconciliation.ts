@@ -43,8 +43,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
   let leafCount = 0;
   const scope = (questions: Clarification[]) => {
     const ids = new Set(questions.flatMap(question => [...(question.sourceRefs ?? []).map(ref => ref.sourceUnitId), ...question.affectedIds.filter(id => id.startsWith('S-'))]));
-    const requirements = project.requirements.filter(requirement => questions.some(question => question.affectedIds.includes(requirement.id)) || requirement.sourceUnitIds.some(id => ids.has(id)));
-    return {requirements, units: context.units([...ids, ...requirements.flatMap(requirement => requirement.sourceUnitIds)])};
+    const requirements = project.requirements.filter(requirement => questions.some(question => question.affectedIds.includes(requirement.id)) || requirement.sourceRefs.map(ref=>ref.sourceUnitId).some(id => ids.has(id)));
+    return {requirements, units: context.units([...ids, ...requirements.flatMap(requirement => requirement.sourceRefs.map(ref=>ref.sourceUnitId))])};
   };
   const inspect = async (questions: Clarification[], requirements: Requirements, units: SourceUnit[]) => {
     leafCount++;
@@ -58,8 +58,8 @@ export async function reconcileClarifications(context: ReconciliationContext) {
     }
   };
   const inspectOne = async (question: Clarification, requirements: Requirements, units: SourceUnit[]) => {
-    const referenced = new Set(requirements.flatMap(requirement => requirement.sourceUnitIds));
-    const atoms = [...requirements.map(requirement => ({requirements: [requirement], units: context.units(requirement.sourceUnitIds)})), ...units.filter(unit => !referenced.has(unit.id)).map(unit => ({requirements: [] as Requirements, units: [unit]}))];
+    const referenced = new Set(requirements.flatMap(requirement => requirement.sourceRefs.map(ref=>ref.sourceUnitId)));
+    const atoms = [...requirements.map(requirement => ({requirements: [requirement], units: context.units(requirement.sourceRefs.map(ref=>ref.sourceUnitId))})), ...units.filter(unit => !referenced.has(unit.id)).map(unit => ({requirements: [] as Requirements, units: [unit]}))];
     const merge = (parts: typeof atoms) => ({requirements: parts.flatMap(part => part.requirements), sourceUnits: [...new Map(parts.flatMap(part => part.units).map(unit => [unit.id, unit])).values()], clarification: question});
     const packs: typeof atoms[] = [];
     let current: typeof atoms = [];
@@ -81,7 +81,7 @@ export async function reconcileClarifications(context: ReconciliationContext) {
       return {clarification: question, facts, sourceUnits: context.units(new Set(refs.map(ref => ref.sourceUnitId))), evidenceSourceRefs: refs};
     };
     const jointContract = instruction + ' 当前已完成全部证据分片。可以联合不同分片的定义、条件、规则推导新答案，不得只选择某个分片动作。输出 actions，并在每个 remove-answered 动作提供 evidenceIds。keep 仅限真实业务缺口，不得因分片缺证保留。平台尚未查清返回 {"unresolved":"具体平台问题"}。依据原文事实及例外裁决。';
-    const compactRequirements = requirements.map(({id, sourceUnitIds}) => ({id, sourceUnitIds}));
+    const compactRequirements = requirements.map(({id, sourceRefs}) => ({id, sourceRefs}));
     const jointInput = (facts: Fact[]) => ({...evidenceInput(facts), requirements: compactRequirements, clarifications: [question], checkedScopes: reports.map(report => report.scope)});
     const facts = allFacts;
     const input = jointInput(facts);

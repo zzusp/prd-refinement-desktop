@@ -62,7 +62,7 @@ export function planDetailRepairs(issues:AuditIssue[],project:PrdProject):Repair
     // 功能 ID 只用于定位归属，不能授权改写整个功能；来源遗漏允许定点新增需求。
     questions=distinct([...questions,...project.clarifications.filter(question=>question.affectedIds.some(id=>requirements.includes(id))).map(question=>question.id)]);
     const sourceIds=new Set(project.sourceUnits.map(unit=>unit.id));
-    const evidence=distinct([...issue.sourceUnitIds,...requirements.flatMap(id=>requirementById.get(id)!.sourceUnitIds),...questions.flatMap(id=>questionById.get(id)!.affectedIds.flatMap(ref=>requirementById.get(ref)?.sourceUnitIds??[ref]))]).filter(id=>sourceIds.has(id));
+    const evidence=distinct([...issue.sourceUnitIds,...requirements.flatMap(id=>requirementById.get(id)!.sourceRefs.map(ref=>ref.sourceUnitId)),...questions.flatMap(id=>questionById.get(id)!.affectedIds.flatMap(ref=>requirementById.get(ref)?.sourceRefs.map(source=>source.sourceUnitId)??[ref]))]).filter(id=>sourceIds.has(id));
     const scope:RepairScope={key:issue.id,issues:[issue],featureIds:features.map(feature=>feature.id),requirementIds:requirements,clarificationIds:questions,sourceUnitIds:evidence,requiredSourceUnitIds:distinct(issue.sourceUnitIds)};
     let merged=true;
     while(merged){merged=false;for(let index=scopes.length-1;index>=0;index--){const other=scopes[index];const sharedWrite=other.requirementIds.some(id=>scope.requirementIds.includes(id))||other.clarificationIds.some(id=>scope.clarificationIds.includes(id));const sameSources=other.sourceUnitIds.length===scope.sourceUnitIds.length&&other.sourceUnitIds.every(id=>scope.sourceUnitIds.includes(id));const sameMissingTarget=!other.requirementIds.length&&!scope.requirementIds.length&&!other.clarificationIds.length&&!scope.clarificationIds.length&&sameSources&&other.featureIds.some(id=>scope.featureIds.includes(id));if(!sharedWrite&&!sameMissingTarget)continue;
@@ -85,13 +85,13 @@ export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:Re
   if(Object.keys(raw).some(key=>!['requirements','deleteRequirementIds','clarifications','deleteClarificationIds'].includes(key)))throw new DomainValidationError('增量包含未知字段');
   if(!Array.isArray(raw.requirements)||!Array.isArray(raw.clarifications))throw new DomainValidationError('增量必须包含 requirements 和 clarifications 数组');
   const sourceUnits=project.sourceUnits.filter(unit=>scope.sourceUnitIds.includes(unit.id));
-  const rawRequirements=raw.requirements;
+  const rawRequirements=raw.requirements.map(value=>{const item=record(value),owners=project.features.filter(feature=>feature.requirementIds.includes(String(item.id)));return {...item,featureId:item.featureId??(owners.length===1?owners[0].id:scope.featureIds.length===1?scope.featureIds[0]:'')};});
   const accepted=acceptDirectDetails(rawRequirements,[],sourceUnits,true).requirements;
   const existing=new Set([...project.requirements,...project.clarifications,...project.features,...project.sourceUnits].map(item=>item.id));
   const checkId=(id:string,allowed:string[])=>{if(existing.has(id)){if(!allowed.includes(id))throw new DomainValidationError(`越界修改 ${id}`)}else if(!/^LOCAL-[A-Za-z0-9_-]+$/.test(id))throw new DomainValidationError(`新增项 ${id} 必须使用 LOCAL- ID`)};
   const requirements=accepted.map((item,index)=>{
     checkId(item.id,scope.requirementIds);
-    const content=(entry:RequirementDetail)=>JSON.stringify([entry.title,entry.behavior,entry.conditions,entry.constraints,entry.explicitAcceptanceConditions,[...entry.sourceUnitIds].sort(),entry.state]);
+    const content=(entry:RequirementDetail)=>JSON.stringify([entry.text,entry.sourceRefs,entry.state]);
     if(!existing.has(item.id)&&project.requirements.some(other=>!scope.requirementIds.includes(other.id)&&content(other)===content(item)))throw new DomainValidationError(`${item.id} 复制了范围外需求`);
     const owners=project.features.filter(feature=>feature.requirementIds.includes(item.id));
     const requested=record(rawRequirements[index]).featureId;
@@ -110,7 +110,7 @@ export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:Re
     const affectedIds=item.affectedIds;
     if(!affectedIds.length||affectedIds.some(ref=>!allowedRefs.has(ref)&&!retainedRefs.has(ref)))throw new DomainValidationError(`${id} 引用越出修正范围`);
     if(!existing.has(id)&&project.clarifications.some(other=>!scope.clarificationIds.includes(other.id)&&other.question===item.question&&other.reason===item.reason&&JSON.stringify([...other.affectedIds].sort())===JSON.stringify([...affectedIds].sort())))throw new DomainValidationError(`${id} 复制了范围外澄清`);
-    return{...item,affectedIds};
+    return{...item,affectedIds,...(previous?.userDecision?{userDecision:previous.userDecision}:{})};
   });
   const deleteRequirementIds=stringList(raw.deleteRequirementIds,'deleteRequirementIds'),deleteClarificationIds=stringList(raw.deleteClarificationIds,'deleteClarificationIds');
   for(const id of deleteRequirementIds)if(!scope.requirementIds.includes(id))throw new DomainValidationError(`越界删除 ${id}`);
@@ -132,7 +132,7 @@ export function applyRequirementPatch(project:PrdProject,scope:RepairScope,patch
   for(const item of validated.clarifications)mapping.set(item.id,allocateIds&&item.id.startsWith('LOCAL-')?`Q-${String(nextQ++).padStart(4,'0')}`:item.id);
   const changedR=new Set(validated.requirements.map(item=>item.id)),changedQ=new Set(validated.clarifications.map(item=>item.id));
   result.requirements=result.requirements.filter(item=>!changedR.has(item.id)&&!validated.deleteRequirementIds.includes(item.id));
-  result.requirements.push(...validated.requirements.map(({featureId:_,...item})=>({...item,id:mapping.get(item.id)!})));
+  result.requirements.push(...validated.requirements.map(item=>({...item,id:mapping.get(item.id)!})));
   result.clarifications=result.clarifications.filter(item=>!changedQ.has(item.id)&&!validated.deleteClarificationIds.includes(item.id));
   result.clarifications.push(...validated.clarifications.map(item=>({...item,id:mapping.get(item.id)!,affectedIds:item.affectedIds.map(id=>mapping.get(id)??id)})));
   for(const feature of result.features){feature.requirementIds=feature.requirementIds.filter(id=>!changedR.has(id)&&!validated.deleteRequirementIds.includes(id));feature.requirementIds.push(...validated.requirements.filter(item=>item.featureId===feature.id).map(item=>mapping.get(item.id)!));}
@@ -147,13 +147,12 @@ export function applyRequirementPatch(project:PrdProject,scope:RepairScope,patch
 export function validateRepair(before:RequirementDetail[], candidate:RequirementDetail[], project:PrdProject) {
   const ids=new Set(before.map(item=>item.id));
   if(candidate.length!==before.length||candidate.some(item=>!ids.has(item.id)))throw new DomainValidationError('定点返工必须保留本功能全部需求ID');
-  const covered=new Set(candidate.flatMap(item=>item.ruleIds));
-  const explicit=new Set((project.rules??[]).filter(rule=>rule.status==='explicit').map(rule=>rule.id));
-  for(const id of before.flatMap(item=>item.ruleIds))if(explicit.has(id)&&!covered.has(id))throw new DomainValidationError(`返工丢失明确规则 ${id}`);
-  for(const item of candidate)if(!item.ruleIds.some(id=>explicit.has(id)))throw new DomainValidationError(`返工项 ${item.id} 仅引用待确认规则，不能作为确定需求`);
+  acceptDirectDetails(candidate,[],project.sourceUnits,true);
+  for(const old of before){const replacement=candidate.find(item=>item.id===old.id)!;if(replacement.featureId!==old.featureId)throw new DomainValidationError('定点返工不得更改主功能');}
+
 }
 
-export const repairInstructions='仅修复 issues 指出的本功能需求明细偏差，依据原文，不增加业务假设，不解答待确认问题，不生成测试场景。explicitAcceptanceConditions仅能逐字引用原文明示的验收条件，普通字段规则或枚举不能改写成验收场景；没有则返回空数组。返回本功能全部 requirements；必须保留已有需求 ID 和全部明确规则覆盖，不修改其他功能。若提供功能说明，返回 feature（id,name,goal,sourceUnitIds,ruleIds,state），保留功能ID与规则归属，仅校正名称及目标中的无依据表达。每项包含 id,title,behavior,conditions, constraints,explicitAcceptanceConditions,sourceUnitIds,ruleIds,state；state只能draft或needs-clarification。输出 {"requirements":[...],"clarifications":[],"feature":{...}}。';
+export const repairInstructions='仅修复 issues 指出的需求条目偏差，依据主 PRD，不增加业务假设。每项只有 id、featureId、text、evidenceIds，text是简短清单表述，保留必要限定；完整待处理事项和建议按原契约返回，不将建议写成正式需求。保留原ID与功能归属，不修改范围外内容。';
 
 export function nextRuleId(rules:RequirementRule[]){return Math.max(0,...rules.map(rule=>Number(rule.id.match(/RL-(\d+)/)?.[1]??0)))+1}
 

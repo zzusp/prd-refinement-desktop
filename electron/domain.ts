@@ -100,34 +100,14 @@ export function acceptFeatures(value: unknown, rules: RequirementRule[], sourceU
   uniqueIds(features,'features'); return features;
 }
 
-export function acceptDetails(requirementsValue: unknown, questionsValue: unknown, rules: RequirementRule[], sourceUnits: SourceUnit[]) {
-  if(!Array.isArray(requirementsValue)||!Array.isArray(questionsValue))throw new DomainValidationError('需求细化必须同时返回 requirements 与 clarifications 数组');
-  const ruleIds=new Set(rules.map(rule=>rule.id)),sourceIds=new Set(sourceUnits.map(unit=>unit.id));
-  const parsedRequirements=requirementsValue.map((raw,index)=>{const item=raw as Record<string,unknown>,state=text(item.state,`requirements[${index}].state`);if(!reviewStates.has(state))throw new DomainValidationError(`requirements[${index}].state 非法`);const requirement:RequirementDetail={id:text(item.id,`requirements[${index}].id`),title:text(item.title,`requirements[${index}].title`),behavior:text(item.behavior,`requirements[${index}].behavior`),conditions:strings(item.conditions,`requirements[${index}].conditions`),constraints:strings(item.constraints,`requirements[${index}].constraints`),explicitAcceptanceConditions:strings(item.explicitAcceptanceConditions,`requirements[${index}].explicitAcceptanceConditions`),sourceUnitIds:strings(item.sourceUnitIds,`requirements[${index}].sourceUnitIds`,false),ruleIds:strings(item.ruleIds,`requirements[${index}].ruleIds`,false),state:state as RequirementDetail['state']};refs(requirement.ruleIds,ruleIds,`requirements[${index}].ruleIds`);refs(requirement.sourceUnitIds,sourceIds,`requirements[${index}].sourceUnitIds`);return requirement});
-  uniqueIds(parsedRequirements,'requirements');
-  const downgraded=new Map(parsedRequirements.filter(requirement=>!rules.some(rule=>requirement.ruleIds.includes(rule.id)&&rule.status==='explicit')).map(requirement=>[requirement.id,requirement]));
-  const requirements=parsedRequirements.filter(requirement=>!downgraded.has(requirement.id));
-  const normalize=(value:string)=>value.replace(/\s/g,'').toLocaleLowerCase('en-US');
-  for(const requirement of requirements){
-    const originals=sourceUnits.filter(unit=>requirement.sourceUnitIds.includes(unit.id)).map(unit=>normalize([unit.excerpt,unit.context??'',unit.asset?.extractedText??''].join('\n')));
-    requirement.explicitAcceptanceConditions=requirement.explicitAcceptanceConditions.filter(condition=>originals.some(original=>original.includes(normalize(condition))));
-  }
-  const localIds=new Set(parsedRequirements.map(item=>item.id));
-  const clarifications=questionsValue.map((raw,index)=>{const item=raw as Record<string,unknown>,state=text(item.state,`clarifications[${index}].state`);if(state!=='open')throw new DomainValidationError(`clarifications[${index}] 模型不得自动解决待确认事项`);const affected=strings(item.affectedIds,`clarifications[${index}].affectedIds`,false);refs(affected,new Set([...ruleIds,...localIds]),`clarifications[${index}].affectedIds`);const affectedIds=Array.from(new Set(affected.flatMap(id=>downgraded.get(id)?.ruleIds??[id])));const question:Clarification={id:text(item.id,`clarifications[${index}].id`),question:text(item.question,`clarifications[${index}].question`),reason:text(item.reason,`clarifications[${index}].reason`),affectedIds,state:state as Clarification['state']};return question});
-  for(const requirement of downgraded.values())if(!clarifications.some(question=>question.affectedIds.some(id=>requirement.ruleIds.includes(id))))clarifications.push({id:`AUTO-Q-${requirement.id}`,question:`请确认“${requirement.title}”的具体业务要求。`,reason:`模型将待确认规则整理为确定需求，平台已降级；原描述：${requirement.behavior}`,affectedIds:requirement.ruleIds,state:'open'});
-  uniqueIds(clarifications,'clarifications');return{requirements,clarifications};
+export function acceptDetails(requirementsValue:unknown,questionsValue:unknown,_rules:RequirementRule[],units:SourceUnit[]){
+  return acceptDirectDetails(requirementsValue,questionsValue,units);
 }
-
-export function validateGraph(sourceUnits:SourceUnit[],rules:RequirementRule[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[]){
-  if(sourceUnits.some(unit=>unit.status!=='processed'))throw new DomainValidationError('仍有未读取的原文单元');
-  if(sourceUnits.some(unit=>unit.excerpt.trim())&&rules.length===0)throw new DomainValidationError('原文包含内容但规则提取为空');
-  const sourceIds=new Set(sourceUnits.map(x=>x.id)),ruleIds=new Set(rules.map(x=>x.id)),requirementIds=new Set(requirements.map(x=>x.id));
-  for(const rule of rules)refs(rule.sourceUnitIds,sourceIds,`${rule.id}.sourceUnitIds`);
-  for(const feature of features){refs(feature.ruleIds,ruleIds,`${feature.id}.ruleIds`);refs(feature.requirementIds,requirementIds,`${feature.id}.requirementIds`)}
-  for(const requirement of requirements){refs(requirement.ruleIds,ruleIds,`${requirement.id}.ruleIds`);refs(requirement.sourceUnitIds,sourceIds,`${requirement.id}.sourceUnitIds`)}
-  for(const question of clarifications)refs(question.affectedIds,new Set([...ruleIds,...requirementIds]),`${question.id}.affectedIds`);
-  const assigned=new Set(features.flatMap(feature=>feature.ruleIds));const implemented=new Set(requirements.flatMap(requirement=>requirement.ruleIds));
-  return{unassigned:rules.filter(rule=>!assigned.has(rule.id)),unimplemented:rules.filter(rule=>rule.status==='explicit'&&!implemented.has(rule.id)),unknown:rules.filter(rule=>rule.status==='unknown')};
+export function validateGraph(units:SourceUnit[],rules:RequirementRule[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[]){
+  const dispositions=units.map(unit=>({sourceUnitId:unit.id,kind:'context' as const,reason:'原文情境',featureIds:[]}));
+  validateDirectGraph(units,dispositions,features,requirements,clarifications);
+  const covered=new Set(requirements.flatMap(item=>item.sourceRefs.map(ref=>ref.sourceUnitId)));
+  return {unassigned:rules.filter(rule=>!features.some(feature=>feature.ruleIds.includes(rule.id))),unimplemented:rules.filter(rule=>rule.status==='explicit'&&!rule.sourceUnitIds.every(id=>covered.has(id))),unknown:rules.filter(rule=>rule.status==='unknown')};
 }
 
 export function acceptAuditIssues(value:unknown,sourceUnits:SourceUnit[],rules:RequirementRule[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[],relations:RequirementRelation[]=[]){
@@ -235,18 +215,33 @@ export function acceptFeatureUnification(value:unknown,candidates:Feature[],sour
   return features;
 }
 
-export function acceptDirectDetails(requirementsValue:unknown,questionsValue:unknown,sourceUnits:SourceUnit[],requireEvidenceBindings=false){
-  if(!Array.isArray(requirementsValue)||!Array.isArray(questionsValue))throw new DomainValidationError('需求细化必须同时返回 requirements 与 clarifications 数组');const sourceIds=new Set(sourceUnits.map(unit=>unit.id));
-  const requirements=requirementsValue.map((raw,index)=>{const item=raw as Record<string,unknown>,state=text(item.state,`requirements[${index}].state`);if(!reviewStates.has(state))throw new DomainValidationError(`requirements[${index}].state 非法`);const requirement:RequirementDetail={id:text(item.id,`requirements[${index}].id`),title:text(item.title,`requirements[${index}].title`),behavior:text(item.behavior,`requirements[${index}].behavior`),conditions:strings(item.conditions,`requirements[${index}].conditions`),constraints:strings(item.constraints,`requirements[${index}].constraints`),explicitAcceptanceConditions:strings(item.explicitAcceptanceConditions,`requirements[${index}].explicitAcceptanceConditions`),sourceUnitIds:strings(item.sourceUnitIds,`requirements[${index}].sourceUnitIds`,false),ruleIds:[],state:state as RequirementDetail['state']};refs(requirement.sourceUnitIds,sourceIds,`requirements[${index}].sourceUnitIds`);
-    const all=requirement.sourceUnitIds.map(sourceUnitId=>({sourceUnitId}));const rawBindings=item.evidenceBindings;if(requireEvidenceBindings&&rawBindings===undefined)throw new DomainValidationError(`${requirement.id}.evidenceBindings 缺失，当前流程必须逐字段选择直接证据`);
-    if(rawBindings!==undefined){if(!rawBindings||typeof rawBindings!=='object'||Array.isArray(rawBindings))throw new DomainValidationError(`${requirement.id}.evidenceBindings 必须是对象`);const binding=rawBindings as Record<string,unknown>,one=(value:unknown,label:string)=>{const selected=Array.isArray(value)?sourceRefs({sourceRefs:value},sourceUnits,label):value&&typeof value==='object'?(()=>{const entry=value as Record<string,unknown>;return sourceRefs(Array.isArray(entry.sourceRefs)?entry:{sourceRefs:[entry]},sourceUnits,label)})():sourceRefs({sourceUnitIds:value},sourceUnits,label);if(!selected.length)throw new DomainValidationError(`${label} 不得为空`);return selected},many=(value:unknown,count:number,label:string)=>{if(!Array.isArray(value)||value.length!==count)throw new DomainValidationError(`${label} 必须与对应字段逐项匹配：需要 ${count} 组，实际 ${Array.isArray(value)?value.length:'不是数组'} 组`);return value.map((entry,n)=>one(entry,`${label}[${n}]`))};requirement.evidenceBindings={behavior:one(binding.behavior,`${requirement.id}.evidenceBindings.behavior`),conditions:many(binding.conditions,requirement.conditions.length,`${requirement.id}.evidenceBindings.conditions`),constraints:many(binding.constraints,requirement.constraints.length,`${requirement.id}.evidenceBindings.constraints`),explicitAcceptanceConditions:many(binding.explicitAcceptanceConditions,requirement.explicitAcceptanceConditions.length,`${requirement.id}.evidenceBindings.explicitAcceptanceConditions`)}}
-    else requirement.evidenceBindings={behavior:all,conditions:requirement.conditions.map(()=>all),constraints:requirement.constraints.map(()=>all),explicitAcceptanceConditions:requirement.explicitAcceptanceConditions.map(()=>all)};
-    const bound=[...requirement.evidenceBindings.behavior,...requirement.evidenceBindings.conditions.flat(),...requirement.evidenceBindings.constraints.flat(),...requirement.evidenceBindings.explicitAcceptanceConditions.flat()];const derived=[...new Set(bound.map(ref=>ref.sourceUnitId))];if(derived.some(id=>!requirement.sourceUnitIds.includes(id)))throw new DomainValidationError(`${requirement.id}.evidenceBindings 超出需求来源范围`);return requirement});uniqueIds(requirements,'requirements');
-  const normalize=(value:string)=>value.replace(/\s/g,'').toLocaleLowerCase('en-US');for(const requirement of requirements){const originals=sourceUnits.filter(unit=>requirement.sourceUnitIds.includes(unit.id)).map(unit=>normalize([unit.excerpt,unit.context??'',unit.asset?.extractedText??''].join('\n')));const splitExact=(condition:string)=>{if(originals.some(original=>original.includes(normalize(condition))))return[condition];const clauses=condition.split('；').map(value=>value.trim()).filter(Boolean),memo=new Map<number,string[]|undefined>();const visit=(start:number):string[]|undefined=>{if(start===clauses.length)return[];if(memo.has(start))return memo.get(start);for(let end=clauses.length;end>start;end--){const candidate=clauses.slice(start,end).join('；');if(!originals.some(original=>original.includes(normalize(candidate))))continue;const rest=visit(end);if(rest){const result=[candidate,...rest];memo.set(start,result);return result}}memo.set(start,undefined);return undefined};return clauses.length>1?visit(0):undefined};const accepted:string[]=[],unsupported:string[]=[];for(const condition of requirement.explicitAcceptanceConditions){const exact=splitExact(condition);exact?accepted.push(...exact):unsupported.push(condition)}if(unsupported.length)throw new DomainValidationError(`${requirement.id}.explicitAcceptanceConditions 必须逐字引用关联原文，不得推导或静默丢弃：${unsupported.join('；')}`);requirement.explicitAcceptanceConditions=accepted}
-   const localIds=new Set(requirements.map(item=>item.id));const clarifications=questionsValue.map((raw,index)=>clarificationFrom(raw as Record<string,unknown>,index,sourceUnits,new Set([...sourceIds,...localIds])));uniqueIds(clarifications,'clarifications');return{requirements,clarifications};
+export function acceptDirectDetails(requirementsValue:unknown,questionsValue:unknown,units:SourceUnit[],_requireEvidenceBindings=false){
+  if(!Array.isArray(requirementsValue)||!Array.isArray(questionsValue))throw new DomainValidationError('需求细化必须同时返回 requirements 与 clarifications 数组');
+  const sourceIds=new Set(units.map(unit=>unit.id));
+  const requirements=requirementsValue.map((raw,index)=>{
+    if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new DomainValidationError('需求项必须为对象');
+    const item=raw as Record<string,unknown>,allowed=new Set(['id','featureId','text','sourceRefs','state','deliveryScope']);
+    if(Object.keys(item).some(key=>!allowed.has(key)))throw new DomainValidationError('需求项不允许旧规格书字段');
+    const id=text(item.id,`requirements[${index}].id`),selected=sourceRefs(item,units,id),state=text(item.state,`${id}.state`);
+    if(!selected.length)throw new DomainValidationError(`${id} 原文引用不得为空`);
+    if(!reviewStates.has(state))throw new DomainValidationError(`${id}.state 非法`);
+    if(item.deliveryScope!==undefined&&item.deliveryScope!=='current'&&item.deliveryScope!=='excluded')throw new DomainValidationError(`${id}.deliveryScope 非法`);
+    for(const ref of selected){const unit=units.find(unit=>unit.id===ref.sourceUnitId)!;if(!unit||unit.synthetic||unit.id.startsWith('USER-')||unit.sourceRole&&unit.sourceRole!=='primary')throw new DomainValidationError(`${id} 正式需求只能来自主 PRD，不得来自用户决定或补充资料`);}
+    return {id,featureId:text(item.featureId,`${id}.featureId`),text:text(item.text,`${id}.text`),sourceRefs:selected,state:state as RequirementDetail['state'],...(item.deliveryScope?{deliveryScope:item.deliveryScope as RequirementDetail['deliveryScope']}:{})};
+  });uniqueIds(requirements,'requirements');
+  const known=new Set([...sourceIds,...requirements.map(item=>item.id)]);
+  const clarifications=questionsValue.map((raw,index)=>clarificationFrom(raw as Record<string,unknown>,index,units,known));uniqueIds(clarifications,'clarifications');
+  return {requirements,clarifications};
 }
 
 export function validateDirectGraph(sourceUnits:SourceUnit[],dispositions:SourceDisposition[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[]){
+  acceptDirectDetails(requirements,[],sourceUnits);
+  for(const question of clarifications)if(question.userDecision!==undefined){
+    const decision=question.userDecision;
+    if(!decision||typeof decision!=='object'||Array.isArray(decision)||Object.keys(decision).some(key=>!['text','confirmedAt','status','operationId'].includes(key)))throw new DomainValidationError(`${question.id}.userDecision 非法`);
+    text(decision.text,`${question.id}.userDecision.text`);text(decision.operationId,`${question.id}.userDecision.operationId`);
+    if(decision.status!=='pending-prd-sync'||!Number.isFinite(Date.parse(text(decision.confirmedAt,`${question.id}.userDecision.confirmedAt`))))throw new DomainValidationError(`${question.id}.userDecision 状态或确认时间非法`);
+  }
   if(sourceUnits.some(unit=>unit.status!=='processed'))throw new DomainValidationError('仍有未读取的原文单元');
   uniqueIds([...sourceUnits,...features,...requirements,...clarifications],'全局实体');
   acceptConstraintTargets(features.map(feature=>({...feature})),features);
@@ -256,10 +251,10 @@ export function validateDirectGraph(sourceUnits:SourceUnit[],dispositions:Source
   const disposed=new Set(dispositions.map(item=>item.sourceUnitId));const undisposed=sourceUnits.filter(unit=>!disposed.has(unit.id));if(undisposed.length)throw new DomainValidationError(`仍有未分类原文单元：${undisposed.slice(0,10).map(unit=>unit.id).join('、')}`);
   const owners=new Map<string,string>();
   for(const feature of features){refs(strings(feature.sourceUnitIds,`${feature.id}.sourceUnitIds`,false),sourceIds,`${feature.id}.sourceUnitIds`);const selected=sourceRefs({sourceRefs:feature.sourceRefs?.length?feature.sourceRefs:feature.sourceUnitIds.map(sourceUnitId=>({sourceUnitId}))},sourceUnits,feature.id),derived=new Set(selected.map(ref=>ref.sourceUnitId));if(feature.sourceUnitIds.some(id=>!derived.has(id))||derived.size!==new Set(feature.sourceUnitIds).size)throw new DomainValidationError(`${feature.id}.sourceUnitIds 必须由 sourceRefs 唯一派生`);refs(feature.requirementIds,requirementIds,`${feature.id}.requirementIds`);for(const id of feature.requirementIds){if(owners.has(id))throw new DomainValidationError(`${id} 必须有且仅有一个主所属功能，重复归属 ${owners.get(id)}、${feature.id}`);owners.set(id,feature.id)}}
-  for(const requirement of requirements){refs(strings(requirement.sourceUnitIds,`${requirement.id}.sourceUnitIds`,false),sourceIds,`${requirement.id}.sourceUnitIds`);if(requirement.evidenceBindings){sourceRefs({sourceRefs:requirement.evidenceBindings.behavior},sourceUnits,`${requirement.id}.evidenceBindings.behavior`);for(const [field,groups] of [['conditions',requirement.evidenceBindings.conditions],['constraints',requirement.evidenceBindings.constraints],['explicitAcceptanceConditions',requirement.evidenceBindings.explicitAcceptanceConditions]] as const)for(const [index,selected] of groups.entries())sourceRefs({sourceRefs:selected},sourceUnits,`${requirement.id}.evidenceBindings.${field}[${index}]`)}if(!owners.has(requirement.id))throw new DomainValidationError(`${requirement.id} 没有主所属功能`)}
+  for(const requirement of requirements){sourceRefs({sourceRefs:requirement.sourceRefs},sourceUnits,requirement.id);if(!owners.has(requirement.id)||owners.get(requirement.id)!==requirement.featureId)throw new DomainValidationError(`${requirement.id} 没有一致的主所属功能`)}
   for(const question of clarifications){refs(strings(question.affectedIds,`${question.id}.affectedIds`,false),new Set([...sourceIds,...requirementIds]),`${question.id}.affectedIds`);if(question.sourceRefs?.length)sourceRefs({sourceRefs:question.sourceRefs},sourceUnits,question.id)}
   const requirementById=new Map(requirements.map(item=>[item.id,item]));
-  const detailed=new Set(requirements.flatMap(item=>item.sourceUnitIds)),questioned=new Set(clarifications.flatMap(item=>item.affectedIds.flatMap(id=>requirementById.get(id)?.sourceUnitIds??[id])));
+  const detailed=new Set(requirements.flatMap(item=>item.sourceRefs.map(ref=>ref.sourceUnitId))),questioned=new Set(clarifications.flatMap(item=>item.affectedIds.flatMap(id=>requirementById.get(id)?.sourceRefs.map(ref=>ref.sourceUnitId)??[id])));
   const uncovered=dispositions.filter(item=>(item.kind==='requirement'||item.kind==='clarification')&&!detailed.has(item.sourceUnitId)&&!questioned.has(item.sourceUnitId));return{uncovered};
 }
 

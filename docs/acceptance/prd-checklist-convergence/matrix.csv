@@ -1,0 +1,10 @@
+case,round,status,evidence
+minimal-domain-contract,2,PASS,round-2.md
+prd-source-redline,2,PASS,round-2.md
+adjustment-organization-only,2,PASS,round-2.md
+typed-runtime-recovery,2,PASS,round-2.md
+ui-checklist,2,PASS,round-2.md
+package-checklist,2,PASS,round-2.md
+real-prd,2,PASS,round-2.md
+real-adjustment,2,PASS,round-2.md
+actual-electron,2,PASS,round-2.md

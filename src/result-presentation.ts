@@ -48,10 +48,7 @@ export function sourceExcerpt(unit: SourceUnit, ref?: SourceRef) {
 }
 
 export function requirementSourceRefs(requirement: RequirementDetail):SourceRef[] {
-  const bindings=requirement.evidenceBindings;
-  if(!bindings)return requirement.sourceUnitIds.map(sourceUnitId=>({sourceUnitId}));
-  const refs=[...bindings.behavior,...bindings.conditions.flat(),...bindings.constraints.flat(),...bindings.explicitAcceptanceConditions.flat()];
-  return [...new Map(refs.map(ref=>[JSON.stringify(ref),ref])).values()];
+  return requirement.sourceRefs;
 }
 
 export function sourceHeading(unit: SourceUnit) {
@@ -84,7 +81,7 @@ export function featureTitle(project: PrdProject, feature: Feature) {
 export function affectedLabels(project: PrdProject, ids: string[]) {
   return ids.map(id => {
     const requirement = project.requirements.find(item => item.id === id);
-    if (requirement) return requirement.title;
+    if (requirement) return requirement.text;
     const feature = project.features.find(item => item.id === id);
     if (feature) return featureTitle(project, feature);
     const source = project.sourceUnits.find(item => item.id === id);

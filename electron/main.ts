@@ -8,7 +8,7 @@ import { createRuntime, ensureStructuredCapability, inspectRuntime, runtimeEnvir
 import { executeNode } from './node-executor.js';
 import { nodeContracts, schemaToJson } from './model-output-schemas.js';
 import { writeResultWorkbook } from './export-excel.js';
-import { writeAgentPackage } from './export-agent-package.js';
+import { packageQuality, writeAgentPackage } from './export-agent-package.js';
 import { AnalysisTaskScheduler, CURRENT_PIPELINE_VERSION } from './scheduler-v2.js';
 import { MaterialBundleStore } from './material-bundle.js';
 import type { MaterialAddition, MaterialFilePatch, MaterialQuery } from '../src/material-types.js';
@@ -34,6 +34,15 @@ function projectPath(id: string) {
 
 function resultRoot(id: string) { return path.join(dataRoot(), id, 'result'); }
 function taskRoot() { return path.join(app.getPath('userData'), 'analysis-tasks'); }
+
+export async function exportAnalysisPackage(scheduler:AnalysisTaskScheduler,taskId:string){
+  const task=scheduler.get(taskId);if(!task||task.resultVersion===undefined||!['completed','needs-attention','failed'].includes(task.status))throw new Error('当前任务还没有可导出的结果');
+  const selectedFeatureIds=task.project.features.filter(feature=>feature.kind!=='constraint'&&feature.requirementIds.some(id=>task.project.requirements.find(requirement=>requirement.id===id)?.deliveryScope!=='excluded')).map(feature=>feature.id);if(!selectedFeatureIds.length)throw new Error('当前没有本期需求，无法生成交付包');
+  const assessment=packageQuality(task,task.project),ready=assessment.state==='ready';
+  const result=await writeAgentPackage(task.project,task,path.join(taskRoot(),task.id,'result',ready?'deliveries':'drafts'),undefined,{selectedFeatureIds});
+  if(result.manifest.qualityState!==assessment.state)throw new Error('导出状态在生成期间发生变化，请重新生成');
+  return scheduler.recordArtifact(task.id,{kind:ready?'agent-package':'draft',path:result.directory,resultVersion:task.resultVersion});
+}
 
 const defaultRuntimeConfig: RuntimeConfig = { adapter: 'codex-oauth', provider: 'openai-codex', fastModel: 'gpt-5.6-luna', fastReasoningEffort: 'low', model: 'gpt-5.6-terra', reasoningEffort: 'low', nodeProfiles:{imageReading:{model:'gpt-5.6-luna',reasoningEffort:'low'},inputInterpretation:{model:'gpt-5.6-luna',reasoningEffort:'low'},featureCandidates:{model:'gpt-5.6-luna',reasoningEffort:'low'},featureCandidateRepair:{model:'gpt-5.6-terra',reasoningEffort:'low'},featureGlobal:{model:'gpt-5.6-terra',reasoningEffort:'low'},detailsFast:{model:'gpt-5.6-luna',reasoningEffort:'low'},details:{model:'gpt-5.6-terra',reasoningEffort:'low'},audit:{model:'gpt-5.6-sol',reasoningEffort:'low'},repair:{model:'gpt-5.6-terra',reasoningEffort:'low'}}, maxParallel: 5, maxNodeParallel:10 };
 function runtimeConfigPath() { return path.join(app.getPath('userData'), 'runtime-config.json'); }
@@ -182,9 +191,7 @@ if (ownsInstance) app.whenReady().then(async () => {
   ipcMain.handle('analysis:artifacts', (_event, taskId:string) => scheduler.queryArtifacts(taskId));
   ipcMain.handle('analysis:open-result', async (_event, taskId: string) => { const task=scheduler.get(taskId);if(!task)return{exists:false,error:'任务不存在'};const artifacts=await scheduler.queryArtifacts(taskId),artifact=artifacts.find(item=>item.resultVersion===task.resultVersion&&item.exists);if(!artifact)return{exists:false,error:artifacts.length?'产物目录已被移动或删除，请重新生成':'当前版本尚未生成产物'};const error=await shell.openPath(artifact.path);return error?{exists:true,path:artifact.path,artifactId:artifact.id,error:`目录打开失败：${error}`}:{exists:true,path:artifact.path,artifactId:artifact.id}; });
   ipcMain.handle('analysis:export-package', async (_event, taskId:string) => {
-    const task=scheduler.get(taskId);if(!task||task.resultVersion===undefined||!['completed','needs-attention'].includes(task.status))throw new Error('当前任务还没有可导出的结果');
-    const selectedFeatureIds=task.project.features.filter(feature=>feature.kind!=='constraint'&&feature.requirementIds.some(id=>task.project.requirements.find(requirement=>requirement.id===id)?.deliveryScope!=='excluded')).map(feature=>feature.id);if(!selectedFeatureIds.length)throw new Error('当前没有本期需求，无法生成交付包');
-    const result=await writeAgentPackage(task.project,task,path.join(taskRoot(),task.id,'result','deliveries'),undefined,{selectedFeatureIds});return scheduler.recordArtifact(task.id,{kind:'agent-package',path:result.directory,resultVersion:task.resultVersion});
+    return exportAnalysisPackage(scheduler,taskId);
   });
   await createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });

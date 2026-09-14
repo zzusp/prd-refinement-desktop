@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DomainValidationError } from "./node-validation.js";
 import type {
   Clarification,
   Feature,
@@ -15,15 +16,18 @@ import type {
 import { acceptDirectDetails, acceptRequirementRelations } from "./domain.js";
 import {
   evidencePromptInput,
+  materializeDetailEvidenceSelections,
   materializeEvidenceSelections,
 } from "./source-evidence.js";
 
 export interface AdjustmentModelAdapter {
-  generate(input: {
+  generate<T>(input: {
+    operation: "adjustmentParse" | "adjustmentGenerate" | "adjustmentRepair" | "adjustmentReview";
     title: string;
     instruction: string;
     input: unknown;
-  }): Promise<unknown>;
+    accept: (value: Record<string, unknown>) => T;
+  }): Promise<T>;
 }
 export interface AdjustmentBase {
   taskId: string;
@@ -84,17 +88,17 @@ type Review = {
 const clone = <T>(v: T): T => structuredClone(v),
   obj = (v: unknown, n: string) => {
     if (!v || typeof v !== "object" || Array.isArray(v))
-      throw new Error(`${n} 必须是对象`);
+      throw new DomainValidationError(`${n} 必须是对象`);
     return v as Record<string, unknown>;
   },
   arr = (v: unknown, n: string) => {
-    if (!Array.isArray(v)) throw new Error(`${n} 必须是数组`);
+    if (!Array.isArray(v)) throw new DomainValidationError(`${n} 必须是数组`);
     return v;
   };
 const strs = (v: unknown, n: string) =>
   arr(v, n).map((x, i) => {
     if (typeof x !== "string" || !x.trim())
-      throw new Error(`${n}[${i}] 必须是非空字符串`);
+      throw new DomainValidationError(`${n}[${i}] 必须是非空字符串`);
     return x.trim();
   });
 const digest = (v: unknown) =>
@@ -275,7 +279,8 @@ export class RefinementAdjustmentEngine {
     acceptedProposals: NonNullable<RefinementAdjustmentRequest['acceptedProposals']>,
     project: PrdProject,
   ): Promise<FeedbackAdjustmentPlan> {
-    const raw = await this.adapter.generate({
+    return this.adapter.generate({
+        operation: "adjustmentParse",
         title: "解析任务调整说明",
         instruction:
           '拆分用户意见。quote 必须逐字来自 feedback。organization 只是整理/粒度指令；business-fact 是明确业务口径；replace-fact 是明确替换旧口径；defer 是暂不处理；question 是询问。按功能、需求正文和澄清定位明确目标。acceptedProposals 中的 finalText 是用户实际采纳的业务决定，baseRecommendation 只用于版本校验；如果 feedback 另有明确例外或替换口径，以用户补充口径为准，不得同时生成冲突操作。存在多个合理候选、冲突或缺少决定时不得猜，写入 pending。输出 {"operations":[{"id":"O1","quote":"原文片段","kind":"organization|business-fact|replace-fact|defer|question","instruction":"执行意图","featureIds":[],"clarificationIds":[],"atomicGroupId":"可选"}],"pending":[{"id":"P1","quote":"原文片段","question":"具体待确认问题","candidateFeatureIds":[],"candidateClarificationIds":[]}]}。',
@@ -285,7 +290,7 @@ export class RefinementAdjustmentEngine {
           acceptedProposals,
           features: project.features.map((f) => ({
             id: f.id,
-            name: f.name,
+            name: f.name ?? f.id,
             requirements: project.requirements
               .filter((r) => f.requirementIds.includes(r.id))
               .map((r) => ({ id: r.id, title: r.title, behavior: r.behavior })),
@@ -300,14 +305,17 @@ export class RefinementAdjustmentEngine {
               affectedIds: q.affectedIds,
             })),
         },
-      }),
-      p = obj(raw, "反馈解析结果"),
+        accept: (raw) => this.acceptPlan(raw, feedback, project),
+      });
+  }
+  private acceptPlan(raw: Record<string, unknown>, feedback: string, project: PrdProject): FeedbackAdjustmentPlan {
+    const p = obj(raw, "反馈解析结果"),
       featureIds = new Set(project.features.map((x) => x.id)),
       questionIds = new Set(project.clarifications.map((x) => x.id)),
       used = new Set<string>();
     const quote = (v: unknown, n: string) => {
       if (typeof v !== "string" || !v.trim() || !feedback.includes(v))
-        throw new Error(`${n} 必须逐字存在于用户调整说明中`);
+        throw new DomainValidationError(`${n} 必须逐字存在于用户调整说明中`);
       return v;
     };
     const operations = arr(p.operations, "operations").map((raw, i) => {
@@ -321,7 +329,7 @@ export class RefinementAdjustmentEngine {
           `operations[${i}].clarificationIds`,
         );
       if (!id || used.has(id))
-        throw new Error(`operations[${i}].id 非法或重复`);
+        throw new DomainValidationError(`operations[${i}].id 非法或重复`);
       used.add(id);
       if (
         ![
@@ -332,21 +340,21 @@ export class RefinementAdjustmentEngine {
           "question",
         ].includes(String(kind))
       )
-        throw new Error(`operations[${i}].kind 非法`);
+        throw new DomainValidationError(`operations[${i}].kind 非法`);
       if (
         fs.some((id) => !featureIds.has(id)) ||
         qs.some((id) => !questionIds.has(id))
       )
-        throw new Error(`operations[${i}] 引用了不存在的目标`);
+        throw new DomainValidationError(`operations[${i}] 引用了不存在的目标`);
       if (!fs.length && !qs.length)
-        throw new Error(`operations[${i}] 没有明确目标，应放入 pending`);
+        throw new DomainValidationError(`operations[${i}] 没有明确目标，应放入 pending`);
       if (
         ["organization", "business-fact", "replace-fact"].includes(
           String(kind),
         ) &&
         !fs.length
       )
-        throw new Error(
+        throw new DomainValidationError(
           `operations[${i}] 没有可执行功能，应根据澄清影响定位功能或放入 pending`,
         );
       return {
@@ -375,13 +383,13 @@ export class RefinementAdjustmentEngine {
           `pending[${i}].candidateClarificationIds`,
         );
       if (!id || used.has(id) || !question)
-        throw new Error(`pending[${i}] 缺少唯一编号或具体问题`);
+        throw new DomainValidationError(`pending[${i}] 缺少唯一编号或具体问题`);
       used.add(id);
       if (
         fs.some((id) => !featureIds.has(id)) ||
         qs.some((id) => !questionIds.has(id))
       )
-        throw new Error(`pending[${i}] 引用了不存在的候选`);
+        throw new DomainValidationError(`pending[${i}] 引用了不存在的候选`);
       return {
         id,
         quote: q,
@@ -463,8 +471,9 @@ export class RefinementAdjustmentEngine {
           ) || ops.some((op) => op.clarificationIds.includes(q.id)),
       ),
       prepared = evidencePromptInput({
+        projectContextHash: digest(project),
         feature,
-        requirements: old,
+        currentRequirements: old,
         clarifications: questions,
         relations: (project.relations ?? []).filter(
           (x) =>
@@ -481,20 +490,16 @@ export class RefinementAdjustmentEngine {
               : "用户明确业务依据",
         })),
       });
-    let raw = await this.adapter.generate({
+    const accept = (raw: Record<string, unknown>) => this.applyActions(
+      project, feature, questions, this.accept(raw, prepared.catalog, units), version, ops, evidence,
+    );
+    let candidate = await this.adapter.generate({
+        operation: "adjustmentGenerate",
         title: `批量调整功能：${feature.name ?? feature.id}`,
         instruction: this.generationInstruction(),
         input: prepared.input,
+        accept,
       }),
-      candidate = this.applyActions(
-        project,
-        feature,
-        questions,
-        this.accept(raw, prepared.catalog, units),
-        version,
-        ops,
-        evidence,
-      ),
       review = await this.review(
         candidate,
         feature,
@@ -504,7 +509,8 @@ export class RefinementAdjustmentEngine {
         evidence,
       );
     if (!review.passed) {
-      raw = await this.adapter.generate({
+      candidate = await this.adapter.generate({
+        operation: "adjustmentRepair",
         title: `批量调整功能·有据修正：${feature.name ?? feature.id}`,
         instruction: `只修正以下依据问题并返回完整显式动作：${review.issues.join("；")}`,
         input: {
@@ -512,16 +518,8 @@ export class RefinementAdjustmentEngine {
           candidate: this.snapshot(candidate, feature),
           review,
         },
+        accept,
       });
-      candidate = this.applyActions(
-        project,
-        feature,
-        questions,
-        this.accept(raw, prepared.catalog, units),
-        version,
-        ops,
-        evidence,
-      );
       review = await this.review(
         candidate,
         feature,
@@ -573,19 +571,21 @@ export class RefinementAdjustmentEngine {
     );
   }
   private generationInstruction() {
-    return '一次落实 userOpinions 的全部意见。organization 只改变组织和表达，不得产生业务规则；只可引用 business-fact/replace-fact 对应用户证据。不得执行 defer/question。返回 {"requirementActions":[{"action":"create|update|delete","targetId":"update/delete 必填","requirement":"create/update 必填"}],"clarificationActions":[{"action":"create|update|keep|resolve|dismiss","targetId":"除 create 外必填","clarification":"create/update 必填","satisfiedRequirementIds":[],"resolutionEvidenceIds":[]}],"relationActions":[]}。未返回动作的旧条目保留；只有答案被需求承接才 resolve。';
+    return '一次落实 userOpinions 的全部意见。organization 只改变组织和表达，不得产生业务规则；只可引用 business-fact/replace-fact 对应用户证据。不得执行 defer/question。返回 {"requirementActions":[{"action":"create|update|delete","targetId":"update/delete 必填","requirement":"create/update 必填"}],"clarificationActions":[{"action":"create|update|keep|resolve|dismiss","targetId":"除 create 外必填","clarification":"create/update 必填","satisfiedRequirementIds":[],"resolutionEvidenceIds":[]}],"relationActions":[]}。requirement 使用 {id,title,behavior:{text,evidenceIds},conditions:[{text,evidenceIds}],constraints:[{text,evidenceIds}],explicitAcceptanceEvidenceIds:[]}；每项业务文本必须配对非空 evidenceIds。不得生成 evidenceBindings、sourceUnitIds、state 或字符位置。未返回动作的旧条目保留；只有答案被需求承接才 resolve。';
   }
   private accept(
     value: unknown,
     catalog: Parameters<typeof materializeEvidenceSelections>[1],
     units: SourceUnit[],
   ): Actions {
+    const proposal = obj(value, "调整模型返回");
+    const rawRequirementActions = arr(proposal.requirementActions, "requirementActions");
     const p = obj(
-      materializeEvidenceSelections(obj(value, "调整模型返回"), catalog),
+      materializeEvidenceSelections({ ...proposal, requirementActions: [] }, catalog),
       "调整模型返回",
     );
     const requirementActions = arr(
-      p.requirementActions,
+      rawRequirementActions,
       "requirementActions",
     ).map((raw, i) => {
       const x = obj(raw, `requirementActions[${i}]`),
@@ -596,14 +596,14 @@ export class RefinementAdjustmentEngine {
         !["create", "update", "delete"].includes(String(action)) ||
         (action !== "create" && !targetId)
       )
-        throw new Error(`requirementActions[${i}] 非法`);
+        throw new DomainValidationError(`requirementActions[${i}] 非法`);
       return {
         action,
         targetId,
         requirement:
           action === "delete"
             ? undefined
-            : acceptDirectDetails([x.requirement], [], units, true)
+            : acceptDirectDetails(materializeDetailEvidenceSelections({ requirements: [x.requirement], clarifications: [] }, catalog).requirements, [], units, true)
                 .requirements[0],
       } as RequirementAction;
     });
@@ -621,13 +621,13 @@ export class RefinementAdjustmentEngine {
         ) ||
         (action !== "create" && !targetId)
       )
-        throw new Error(`clarificationActions[${i}] 非法`);
+        throw new DomainValidationError(`clarificationActions[${i}] 非法`);
       return {
         action,
         targetId,
         clarification:
           action === "create" || action === "update"
-            ? acceptDirectDetails([], [x.clarification], units, true)
+            ? acceptDirectDetails([], [{ ...obj(x.clarification, `clarificationActions[${i}].clarification`), state: "open" }], units, true)
                 .clarifications[0]
             : undefined,
         satisfiedRequirementIds: strs(
@@ -650,7 +650,7 @@ export class RefinementAdjustmentEngine {
           !["create", "update", "delete"].includes(String(action)) ||
           (action !== "create" && !targetId)
         )
-          throw new Error(`relationActions[${i}] 非法`);
+          throw new DomainValidationError(`relationActions[${i}] 非法`);
         return {
           action,
           targetId,
@@ -693,9 +693,9 @@ export class RefinementAdjustmentEngine {
         continue;
       }
       if (!owned.has(a.targetId!))
-        throw new Error(`需求动作越出当前功能：${a.targetId}`);
+        throw new DomainValidationError(`需求动作越出当前功能：${a.targetId}`);
       const at = result.requirements.findIndex((x) => x.id === a.targetId);
-      if (at < 0) throw new Error(`需求不存在：${a.targetId}`);
+      if (at < 0) throw new DomainValidationError(`需求不存在：${a.targetId}`);
       if (a.action === "delete") {
         result.requirements.splice(at, 1);
         target.requirementIds = target.requirementIds.filter(
@@ -718,7 +718,7 @@ export class RefinementAdjustmentEngine {
         continue;
       }
       if (!related.has(a.targetId!))
-        throw new Error(`澄清动作越出当前范围：${a.targetId}`);
+        throw new DomainValidationError(`澄清动作越出当前范围：${a.targetId}`);
       const q = result.clarifications.find((x) => x.id === a.targetId)!;
       if (a.action === "keep") continue;
       if (a.action === "update") {
@@ -728,17 +728,17 @@ export class RefinementAdjustmentEngine {
         });
         continue;
       }
-      if (!allowed.has(q.id)) throw new Error(`用户意见未明确指向澄清 ${q.id}`);
+      if (!allowed.has(q.id)) throw new DomainValidationError(`用户意见未明确指向澄清 ${q.id}`);
       if (
         !a.resolutionEvidenceIds.length ||
         a.resolutionEvidenceIds.some((id) => !facts.has(id))
       )
-        throw new Error(`${q.id} 只能由明确业务事实处理`);
+        throw new DomainValidationError(`${q.id} 只能由明确业务事实处理`);
       if (a.action === "dismiss") q.state = "dismissed";
       else {
         const ids = a.satisfiedRequirementIds.map(remap);
         if (!ids.length || ids.some((id) => !valid.has(id)))
-          throw new Error(`${q.id} resolve 必须指向有效承接需求`);
+          throw new DomainValidationError(`${q.id} resolve 必须指向有效承接需求`);
         q.state = "resolved";
       }
       q.resolutionSourceUnitIds = [
@@ -751,7 +751,7 @@ export class RefinementAdjustmentEngine {
     for (const a of actions.relationActions) {
       const relations = (result.relations ??= []);
       if (a.action === "create") {
-        if (!a.relation) throw new Error("create relation 缺失");
+        if (!a.relation) throw new DomainValidationError("create relation 缺失");
         relations.push({
           ...clone(a.relation),
           id: `REL-ADJ-${version}-${relations.length + 1}`,
@@ -761,7 +761,7 @@ export class RefinementAdjustmentEngine {
         continue;
       }
       const at = relations.findIndex((x) => x.id === a.targetId);
-      if (at < 0) throw new Error(`关系不存在：${a.targetId}`);
+      if (at < 0) throw new DomainValidationError(`关系不存在：${a.targetId}`);
       if (a.action === "delete") relations.splice(at, 1);
       else if (a.relation)
         relations[at] = {
@@ -778,7 +778,7 @@ export class RefinementAdjustmentEngine {
         q.affectedIds.some((id) => id.startsWith("R") && !valid.has(id)),
       )
     )
-      throw new Error("删除需求后存在悬空澄清引用");
+      throw new DomainValidationError("删除需求后存在悬空澄清引用");
     result.relations = acceptRequirementRelations(
       result.relations ?? [],
       result.sourceUnits.concat(evidence.map((x) => this.source(x))),
@@ -795,7 +795,7 @@ export class RefinementAdjustmentEngine {
         ...(r.evidenceBindings?.explicitAcceptanceConditions.flat() ?? []),
       ];
       if (refs.some((ref) => forbidden.has(ref.sourceUnitId)))
-        throw new Error("整理指令不能作为业务事实依据");
+        throw new DomainValidationError("整理指令不能作为业务事实依据");
     }
     target.state = result.clarifications.some(
       (q) =>
@@ -819,7 +819,8 @@ export class RefinementAdjustmentEngine {
     ops: FeedbackOperation[],
     evidence: UserEvidence[],
   ): Promise<Review> {
-    const raw = await this.adapter.generate({
+    return this.adapter.generate({
+        operation: "adjustmentReview",
         title: `批量调整依据核查：${feature.name ?? feature.id}`,
         instruction:
           '只核查候选已有主张是否由 PRD 或 businessFact=true 的用户意见片段支持，不寻找遗漏。关闭澄清必须准确承接答案。输出 {"passed":boolean,"issues":[],"clarificationResolutions":[{"clarificationId":"Q","status":"supported|unsupported","reason":"原因"}]}。',
@@ -830,10 +831,13 @@ export class RefinementAdjustmentEngine {
           userEvidence: evidence,
           candidate: this.snapshot(candidate, feature),
         },
-      }),
-      p = obj(raw, "依据核查结果");
+        accept: (raw) => this.acceptReview(raw, candidate, before),
+      });
+  }
+  private acceptReview(raw: Record<string, unknown>, candidate: PrdProject, before: Clarification[]): Review {
+    const p = obj(raw, "依据核查结果");
     if (typeof p.passed !== "boolean")
-      throw new Error("依据核查结果 passed 必须是布尔值");
+      throw new DomainValidationError("依据核查结果 passed 必须是布尔值");
     const issues = strs(p.issues ?? [], "依据核查结果.issues"),
       clarificationResolutions = arr(
         p.clarificationResolutions ?? [],
@@ -845,7 +849,7 @@ export class RefinementAdjustmentEngine {
           !["supported", "unsupported"].includes(String(x.status)) ||
           typeof x.reason !== "string"
         )
-          throw new Error(`clarificationResolutions[${i}] 非法`);
+          throw new DomainValidationError(`clarificationResolutions[${i}] 非法`);
         return {
           clarificationId: x.clarificationId,
           status: x.status as "supported" | "unsupported",
@@ -895,7 +899,7 @@ export class RefinementAdjustmentEngine {
     for (const x of items)
       if (x.targetId) {
         if (seen.has(x.targetId))
-          throw new Error(`${label}重复操作 ${x.targetId}`);
+          throw new DomainValidationError(`${label}重复操作 ${x.targetId}`);
         seen.add(x.targetId);
       }
   }

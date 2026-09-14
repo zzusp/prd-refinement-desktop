@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { Clarification, ClarificationAction } from '../src/types.js';
-import { assertPromptBudget } from './prompt-budget.js';
 import type { ReconciliationContext } from './clarification-reconciliation.js';
 
 type Pair = { pairId: string; left: string; right: string };
@@ -23,13 +22,12 @@ export async function reconcileRelations(context: ReconciliationContext, questio
   const batches:Batch[]=[];let current:Batch={pairs:[]};
   for(let left=0;left<questions.length;left++)for(let right=left+1;right<questions.length;right++){
     const pair={pairId:JSON.stringify([questions[left].id,questions[right].id]),left:questions[left].id,right:questions[right].id};
-    const candidate={pairs:[...current.pairs,pair]},measurement=context.measure(title,contract,inputFor(candidate));
-    if(current.pairs.length&&(candidate.pairs.length>32||measurement.estimatedTokens>measurement.targetTokens)){batches.push(current);current={pairs:[]}}
-    current.pairs.push(pair);assertPromptBudget(context.measure(title,contract,inputFor(current)));
+    if(current.pairs.length>=32){batches.push(current);current={pairs:[]}}
+    current.pairs.push(pair);
   }
   if(current.pairs.length)batches.push(current);
   const inspect=async(batch:Batch)=>{
-    const input=inputFor(batch);assertPromptBudget(context.measure(title,contract,input));
+    const input=inputFor(batch);
     const identity=createHash('sha256').update(JSON.stringify(batch.pairs.map(pair=>pair.pairId))).digest('hex').slice(0,16);
     const result=await context.ask(title,`clarification-cross-batch-${identity}`,contract,input,value=>{
       if(!Array.isArray(value.relations))throw new Error('跨批一致性检查缺少 relations');

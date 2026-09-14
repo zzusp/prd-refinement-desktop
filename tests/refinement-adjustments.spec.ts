@@ -4,6 +4,11 @@ import {
   type AdjustmentModelAdapter,
 } from "../electron/refinement-adjustments";
 import type { PrdProject, SourceUnit } from "../src/types";
+import type { AnalysisRuntime } from "../electron/runtime";
+import { CandidateValidationError, executeNode } from "../electron/node-executor";
+import { DomainValidationError } from "../electron/node-validation";
+import { DetailEvidenceValidationError } from "../electron/source-evidence";
+import { nodeContracts, schemaToJson } from "../electron/model-output-schemas";
 
 const unit = (id: string, text: string): SourceUnit => ({
   id,
@@ -122,17 +127,10 @@ const req = (
   return {
     id: targetId,
     title: behavior,
-    behavior,
+    behavior: { text: behavior, evidenceIds: [chosen.id] },
     conditions: [],
     constraints: [],
     explicitAcceptanceEvidenceIds: [],
-    evidenceBindings: {
-      behavior: [chosen.id],
-      conditions: [],
-      constraints: [],
-      explicitAcceptanceConditions: [],
-    },
-    state: "reviewed",
   };
 };
 const empty = () => ({
@@ -147,9 +145,114 @@ const request = (feedback: string) => ({
 });
 const adapter = (
   fn: (call: Parameters<AdjustmentModelAdapter["generate"]>[0]) => unknown,
-): AdjustmentModelAdapter => ({ generate: async (call) => fn(call) });
+): AdjustmentModelAdapter => ({ generate: async (call) => call.accept(fn(call) as Record<string, unknown>) });
 
 describe("任务级自然语言批量调整", () => {
+  it("其他功能变化也进入生成和修正的完整项目依赖哈希", async () => {
+    const captured: Array<{ operation: string; input: any }> = [];
+    const value = project();
+    const engine = new RefinementAdjustmentEngine(adapter(call => {
+      if (call.operation === 'adjustmentParse') return { operations: [{ id: 'O1', quote: '精简提交', kind: 'organization', instruction: '精简', featureIds: ['F1'], clarificationIds: [] }], pending: [] };
+      captured.push({ operation: call.operation, input: call.input });
+      if (call.operation === 'adjustmentReview') return { passed: false, issues: ['须修正'], clarificationResolutions: [] };
+      return empty();
+    }), () => new Date('2026-09-14T00:00:00Z'));
+    await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
+    value.requirements.find(item => item.id === 'R2')!.title = '另一功能变化';
+    await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
+    const generated = captured.filter(item => item.operation === 'adjustmentGenerate').map(item => item.input);
+    const repaired = captured.filter(item => item.operation === 'adjustmentRepair').map(item => item.input.originalInput);
+    expect(generated).toHaveLength(2);
+    expect(generated[0].currentRequirements).toEqual(generated[1].currentRequirements);
+    expect(generated[0].projectContextHash).not.toBe(generated[1].projectContextHash);
+    expect(repaired.map(item => item.projectContextHash)).toEqual(generated.map(item => item.projectContextHash));
+  });
+  it("真实执行器贯穿调整输入、候选和正式结果契约", async () => {
+    const value = project(); value.clarifications = [];
+    value.features.forEach(feature => { feature.kind = "function"; });
+    const calls: string[] = [];
+    const engine = new RefinementAdjustmentEngine({
+      async generate(call) {
+        calls.push(call.operation);
+        const contract = nodeContracts[call.operation];
+        const response = call.operation === "adjustmentParse"
+          ? { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] }
+          : call.operation === "adjustmentReview"
+            ? { passed: true, issues: [], clarificationResolutions: [] }
+            : { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement: req(call.input, "R1", "用户可以提交订单") }] };
+        return executeNode({ ...contract, id: call.operation, parameters: schemaToJson(contract.proposal), instructions: call.instruction, accept: value => {
+          try { return call.accept(value); }
+          catch (error) {
+            if (error instanceof DomainValidationError || error instanceof DetailEvidenceValidationError) throw new CandidateValidationError(error.issues);
+            throw error;
+          }
+        } }, {
+          workItemId: call.operation, executionId: "test", input: call.input, configuration: {}, receipts: {}, save: async () => {}, assert() {},
+          runtime: async () => ({ executeOperation: async () => ({ completion: "completed", value: response }) }) as unknown as AnalysisRuntime,
+        });
+      },
+    });
+    const result = await engine.run({ taskId: "T", version: 1, project: value }, request("精简提交"));
+    expect(result.status, result.error).toBe("completed");
+    expect(calls).toEqual(["adjustmentParse", "adjustmentGenerate", "adjustmentReview"]);
+  });
+  it("显式节点身份与领域验收在适配器提交之前执行", async () => {
+    const operations: string[] = [], accepted: string[] = [];
+    const engine = new RefinementAdjustmentEngine({
+      async generate(call) {
+        operations.push(call.operation);
+        const value = call.operation === "adjustmentParse"
+          ? { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] }
+          : { ...empty(), requirementActions: [{ action: "delete", targetId: "R2" }] };
+        const result = call.accept(value);
+        accepted.push(call.operation);
+        return result;
+      },
+    });
+    const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
+    expect(operations).toEqual(["adjustmentParse", "adjustmentGenerate"]);
+    expect(accepted).toEqual(["adjustmentParse"]);
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("需求动作越出当前功能");
+    expect(result.project.requirements).toEqual(project().requirements);
+  });
+
+  it("配对协议拒绝空证据及模型生成内部状态", async () => {
+    for (const invalid of ["empty-evidence", "internal-state"]) {
+      const engine = new RefinementAdjustmentEngine(adapter(call => {
+        if (call.operation === "adjustmentParse") return { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] };
+        const requirement: any = req(call.input, "R1", "用户可以提交订单");
+        if (invalid === "empty-evidence") requirement.behavior.evidenceIds = [];
+        else requirement.state = "reviewed";
+        return { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement }] };
+      }));
+      const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain(invalid === "empty-evidence" ? "非空证据编号数组" : "state");
+      expect(result.project.requirements).toEqual(project().requirements);
+    }
+  });
+
+  it("依据复核失败后使用独立修正身份并重新验收", async () => {
+    const calls: string[] = [];
+    let reviews = 0;
+    const engine = new RefinementAdjustmentEngine(adapter(call => {
+      calls.push(call.operation);
+      if (call.operation === "adjustmentParse") return { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] };
+      if (call.operation === "adjustmentReview") return { passed: ++reviews > 1, issues: reviews === 1 ? ["表达不准确"] : [], clarificationResolutions: [] };
+      const input = call.operation === "adjustmentRepair" ? (call.input as any).originalInput : call.input;
+      const requirement = req(input, "R1", "用户可以提交订单");
+      return { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement }] };
+    }));
+    const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
+    expect(result.status).toBe("completed");
+    expect(calls).toEqual(["adjustmentParse", "adjustmentGenerate", "adjustmentReview", "adjustmentRepair", "adjustmentReview"]);
+    const requirement = result.project.requirements.find(item => item.id === "R1")!;
+    expect(requirement.behavior).toBe("用户可以提交订单");
+    expect(requirement.sourceUnitIds).toEqual(["S1"]);
+    expect(requirement.evidenceBindings?.behavior[0]).toMatchObject({ sourceUnitId: "S1", start: 0 });
+  });
+
   it("跨两功能只处理命中范围，同一功能的多条意见只生成一次", async () => {
     const feedback = "提交订单合并描述；提交订单标题简化；取消订单展开步骤。",
       generated: string[] = [];

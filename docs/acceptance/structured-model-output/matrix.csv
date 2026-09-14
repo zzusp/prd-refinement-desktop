@@ -1,0 +1,6 @@
+case,round-1
+Codex Runtime 携带严格输出 schema,PASS
+逐功能细化调用使用 schema,PASS
+业务字段校验仍然生效,PASS
+完整自动测试与构建,PASS
+真实任务越过原失败节点,PASS

@@ -1,0 +1,10 @@
+case,round-1
+超过旧硬上限的请求仍发送给Runtime,PASS
+token估算只记录不拒绝或拆批,PASS
+audit失败不生成AuditIssue,PASS
+audit失败工作重试后产生新调用,PASS
+audit成功工作在重试时复用,PASS
+旧检查点协议不续跑,PASS
+完整测试与构建,PASS
+真实Electron加载新构建,PASS
+真实任务恢复运行,PARTIAL

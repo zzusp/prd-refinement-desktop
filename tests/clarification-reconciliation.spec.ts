@@ -10,17 +10,13 @@ const question=(id:string):Clarification=>({id,question:'风险分数为90的订
 const source=(id:string,excerpt:string):SourceUnit=>({id,label:id,kind:'paragraph',excerpt,location:id,status:'processed'});
 const project=(questions:Clarification[],units:SourceUnit[]=[]):PrdProject=>({id:'P',name:'test',sourceName:'test',sourceHash:'frozen',revision:1,importedAt:'2026-09-12',rawText:'',stage:'refining',sourceUnits:units,features:[],requirements:[],clarifications:questions});
 type Call={title:string;input:Record<string,any>;key:string;attempt:number};
-function harness(p:PrdProject,respond:(call:Call)=>Record<string,unknown>,split:'evidence'|'pairs'='evidence'){
+function harness(p:PrdProject,respond:(call:Call)=>Record<string,unknown>){
   const calls:Call[]=[],invalidations:Array<{keys:string[];reason:string}>=[],applied:ClarificationAction[][]=[];
   const cache=new Map<string,unknown>(),attempts=new Map<string,number>();
   const context:ReconciliationContext={
     project:p,instruction:'输出 actions。',units:ids=>{const selected=new Set(ids);return p.sourceUnits.filter(unit=>selected.has(unit.id))},
     measure:(title,contract,input)=>{
-      const data=input as Record<string,any>,actual=evidencePromptInput(input).input;
-      const measurement=measurePrompt(JSON.stringify({contract,input:actual}),'repair',{});
-      if(split==='evidence'&&((title==='待澄清事项全局有效性与一致性检查')||(title==='待澄清事项证据提取'&&data.sourceUnits.length>1)))measurement.estimatedTokens=measurement.targetTokens+1;
-      if(split==='pairs'&&data.pairs?.length>1)measurement.estimatedTokens=measurement.targetTokens+1;
-      return measurement;
+      const actual=evidencePromptInput(input).input;return measurePrompt(JSON.stringify({contract,input:actual}),'repair',{});
     },
     ask:async(title,_purpose,_contract,input,accept)=>{
       const key=createHash('sha256').update(JSON.stringify({title,input})).digest('hex');
@@ -62,7 +58,7 @@ describe('澄清证据联合协议',()=>{
       throw new Error(`意外调用 ${call.title}`);
     });
     await reconcileClarifications(h.context);
-    expect(h.calls.filter(c=>c.title==='待澄清事项证据提取')).toHaveLength(2);
+    expect(h.calls.filter(c=>c.title==='待澄清事项证据提取')).toHaveLength(1);
     expect(h.calls.filter(c=>c.title==='待澄清事项证据分片汇总')).toHaveLength(1);
     expect(p.clarifications[0].state).toBe('dismissed');
   });
@@ -90,19 +86,16 @@ describe('澄清证据联合协议',()=>{
   });
   it('反证发现提取遗漏时重新提取受影响原文，其他报告继续复用',async()=>{
     const p=businessFixture(true),h=harness(p,call=>{
-      if(call.title==='待澄清事项证据提取')return call.input.evidenceCatalog[0].sourceUnitId==='S-C'&&call.attempt===1?{facts:[]}:extracted(call);
+      if(call.title==='待澄清事项证据提取')return call.attempt===1?{facts:(extracted(call).facts as any[]).filter(fact=>!fact.statement.includes('不再'))}:extracted(call);
       if(call.title==='待澄清事项证据分片汇总')return call.input.facts.some((fact:any)=>fact.kind==='exception')?{actions:[{action:'keep',clarificationIds:['Q1'],reason:'特殊订单的免审范围尚未定义',satisfiedRequirementIds:[]}]}:answered(call);
       if(call.title==='待澄清事项联合结论复核')return {status:call.input.candidate[0].action==='remove-answered'&&call.input.evidenceCatalog.some((e:any)=>e.sourceUnitId==='S-C')?'rejected':'passed',reason:'遗漏免审例外'};
       throw new Error(`意外调用 ${call.title}`);
     });
-    const original=h.context.measure;
-    h.context.measure=(title,contract,input)=>{const measured=original(title,contract,input);if(title==='待澄清事项联合结论复核'&&(input as Record<string,any>).evidenceSourceRefs.length>2)measured.estimatedTokens=13000;return measured};
     await reconcileClarifications(h.context);
-    expect(h.calls.filter(c=>c.title==='待澄清事项证据提取'&&c.input.evidenceCatalog[0].sourceUnitId==='S-C')).toHaveLength(2);
-    expect(h.calls.filter(c=>c.title==='待澄清事项证据提取'&&c.input.evidenceCatalog[0].sourceUnitId==='S-A')).toHaveLength(1);
+    expect(h.calls.filter(c=>c.title==='待澄清事项证据提取')).toHaveLength(2);
     expect(h.applied.flat().every(a=>a.action==='keep')).toBe(true);
   });
-  it('联合依据占用预算后按复核实际请求重分片，并完整检查全部原文',async()=>{
+  it('token 估算增大不改变复核范围，并完整检查全部原文',async()=>{
     const p=businessFixture(true);p.sourceUnits.push(source('S-D','普通订单不必二次审核。'));p.clarifications[0].affectedIds.push('S-D');
     const h=harness(p,call=>{
       if(call.title==='待澄清事项证据提取')return {facts:(extracted(call).facts as any[]).filter(fact=>!fact.statement.includes('不再')&&!fact.statement.includes('普通订单'))};
@@ -110,42 +103,35 @@ describe('澄清证据联合协议',()=>{
       if(call.title==='待澄清事项联合结论复核')return {status:'passed',reason:'预算装箱测试已检查本片'};
       throw new Error(`意外调用 ${call.title}`);
     });
-    const original=h.context.measure;
-    h.context.measure=(title,contract,input)=>{
-      const measurement=original(title,contract,input),data=input as Record<string,any>;
-      if(title==='待澄清事项证据提取')measurement.estimatedTokens=data.sourceUnits.length>2?13000:6000;
-      if(title==='待澄清事项联合结论复核')measurement.estimatedTokens=data.evidenceSourceRefs.length*6000;
-      return measurement;
-    };
+    h.context.measure=()=>measurePrompt('中'.repeat(50000),'repair',{});
     await reconcileClarifications(h.context);
     const checks=h.calls.filter(call=>call.title==='待澄清事项联合结论复核');
-    expect(checks.length).toBeGreaterThan(2);
-    expect(checks.every(call=>call.input.evidenceCatalog.length<=3)).toBe(true);
+    expect(checks).toHaveLength(1);
     expect(new Set(checks.flatMap(call=>call.input.evidenceCatalog.map((e:any)=>e.sourceUnitId)))).toEqual(new Set(['S-A','S-B','S-C','S-D']));
   });
 });
 
 describe('澄清问题对关系协议',()=>{
   it('unknown 不会否决已被 same 路径证明的合并',async()=>{
-    const h=harness(project(['A','B','C'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:pair.left==='A'&&pair.right==='C'?'unknown':'same',reason:'核对业务决定'}))}),'pairs');
+    const h=harness(project(['A','B','C'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:pair.left==='A'&&pair.right==='C'?'unknown':'same',reason:'核对业务决定'}))}));
     await reconcileRelations(h.context,h.context.project.clarifications);
-    expect(h.calls).toHaveLength(3);expect(h.invalidations).toEqual([]);expect(h.applied.flat()).toMatchObject([{action:'merge',clarificationIds:['A','B','C']}]);
+    expect(h.calls).toHaveLength(1);expect(h.invalidations).toEqual([]);expect(h.applied.flat()).toMatchObject([{action:'merge',clarificationIds:['A','B','C']}]);
   });
   it('真正冲突会重审完整 same 路径，独立 different 判断保持缓存',async()=>{
-    const h=harness(project(['A','B','C','D'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:pair.right==='D'?'different':pair.left==='A'&&pair.right==='C'&&call.attempt===1?'different':'same',reason:'明确业务对象和决定'}))}),'pairs');
+    const h=harness(project(['A','B','C','D'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:pair.right==='D'?'different':pair.left==='A'&&pair.right==='C'&&call.attempt===1?'different':'same',reason:'明确业务对象和决定'}))}));
     await reconcileRelations(h.context,h.context.project.clarifications);
-    expect(new Set(h.invalidations.flatMap(item=>item.keys)).size).toBe(3);
-    expect(h.calls.filter(call=>call.input.pairs[0].right==='D')).toHaveLength(3);
-    expect(h.calls.filter(call=>call.attempt===2)).toHaveLength(3);
+    expect(new Set(h.invalidations.flatMap(item=>item.keys)).size).toBe(1);
+    expect(h.calls.filter(call=>call.input.pairs.some((pair:any)=>pair.right==='D'))).toHaveLength(2);
+    expect(h.calls.filter(call=>call.attempt===2)).toHaveLength(1);
     expect(h.applied.flat()).toMatchObject([{action:'merge',clarificationIds:['A','B','C']}]);
   });
   it('持久缺证不会被标成 different 或通过检查，三轮后明确平台失败',async()=>{
-    const h=harness(project(['A','B'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:'unknown',reason:'缺少区分业务对象的原文'}))}),'pairs');
+    const h=harness(project(['A','B'].map(question)),call=>({relations:call.input.pairs.map((pair:any)=>({pairId:pair.pairId,relation:'unknown',reason:'缺少区分业务对象的原文'}))}));
     await expect(reconcileRelations(h.context,h.context.project.clarifications)).rejects.toThrow('平台未完成澄清关系核查');
     expect(h.calls).toHaveLength(3);expect(h.invalidations).toHaveLength(3);expect(h.applied).toEqual([]);
   });
   it('关系输出缺少问题对时必须拒绝，不能默认不同',async()=>{
-    const h=harness(project(['A','B'].map(question)),()=>({relations:[]}),'pairs');
+    const h=harness(project(['A','B'].map(question)),()=>({relations:[]}));
     await expect(reconcileRelations(h.context,h.context.project.clarifications)).rejects.toThrow('没有覆盖全部');expect(h.applied).toEqual([]);
   });
 });

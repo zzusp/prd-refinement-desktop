@@ -1,3 +1,4 @@
+import { DomainValidationError } from './node-validation.js';
 import { createHash } from 'node:crypto';
 import type { RequirementDetail, SourceRef, SourceUnit } from '../src/types.js';
 
@@ -60,11 +61,11 @@ export function buildEvidenceCatalog(units: SourceUnit[]): SourceEvidence[] {
 }
 
 export function resolveEvidenceIds(ids: unknown, catalog: SourceEvidence[], path: string): SourceRef[] {
-  if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !id.trim())) throw new Error(`${path} 必须是非空证据编号数组`);
+  if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !id.trim())) throw new DomainValidationError(`${path} 必须是非空证据编号数组`);
   const byId = new Map(catalog.map(item => [item.id, item]));
   return ids.map((raw, index) => {
     const evidence = byId.get(raw as string);
-    if (!evidence) throw new Error(`${path}[${index}] 引用了未提供或过期的证据编号：${String(raw)}`);
+    if (!evidence) throw new DomainValidationError(`${path}[${index}] 引用了未提供或过期的证据编号：${String(raw)}`);
     return { sourceUnitId: evidence.sourceUnitId, start: evidence.start, end: evidence.end };
   });
 }
@@ -74,17 +75,29 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
     if (Array.isArray(current)) return current.map((item, index) => visit(item, `${path}[${index}]`));
     if (!current || typeof current !== 'object') return current;
     const item = { ...(current as Record<string, unknown>) };
-    if (catalog.length && Array.isArray(item.sourceRefs) && item.sourceRefs.some(raw => raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'quote'))) throw new Error(`${path}.sourceRefs 不得包含模型抄写的 quote，请选择 evidenceIds`);
+    // 生成候选的初始状态属于平台，不要求模型提交内部生命周期字段。
+    if(typeof item.question==='string'&&typeof item.level==='string'&&Object.prototype.hasOwnProperty.call(item,'evidenceIds'))item.state='open';
+    if(Array.isArray(item.features))item.features=item.features.map(raw=>raw&&typeof raw==='object'?{...raw,state:'draft'}:raw);
+    if (catalog.length && Array.isArray(item.sourceRefs) && item.sourceRefs.some(raw => raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'quote'))) throw new DomainValidationError(`${path}.sourceRefs 不得包含模型抄写的 quote，请选择 evidenceIds`);
     if (Object.prototype.hasOwnProperty.call(item, 'evidenceIds')) {
       item.sourceRefs = resolveEvidenceIds(item.evidenceIds, catalog, `${path}.evidenceIds`);
       delete item.evidenceIds;
     }
-    if (item.evidenceIdsByFeature && typeof item.evidenceIdsByFeature === 'object' && !Array.isArray(item.evidenceIdsByFeature)) {
-      item.sourceRefsByFeature = Object.fromEntries(Object.entries(item.evidenceIdsByFeature as Record<string, unknown>).map(([key, ids]) => [key, resolveEvidenceIds(ids, catalog, `${path}.evidenceIdsByFeature.${key}`)]));
-      delete item.evidenceIdsByFeature;
+    if (Object.prototype.hasOwnProperty.call(item, 'allocations')) {
+      if (!Array.isArray(item.allocations) || !item.allocations.length) throw new DomainValidationError(`${path}.allocations 必须为非空证据分配数组`);
+      if (item.sourceRefsByFeature !== undefined) throw new DomainValidationError(`${path} 不得混用证据分配协议`);
+      const seen = new Set<string>();
+      item.sourceRefsByFeature = Object.fromEntries(item.allocations.map((raw, index) => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new DomainValidationError(`${path}.allocations[${index}] 必须是对象`);
+        const allocation = raw as Record<string, unknown>, id = allocation.featureId;
+        if (typeof id !== 'string' || !id.trim() || seen.has(id)) throw new DomainValidationError(`${path}.allocations[${index}].featureId 无效或重复`);
+        seen.add(id);
+        return [id, resolveEvidenceIds(allocation.evidenceIds, catalog, `${path}.allocations[${index}].evidenceIds`)];
+      }));
+      delete item.allocations;
     }
     if (Object.prototype.hasOwnProperty.call(item, 'explicitAcceptanceEvidenceIds')) {
-      if (!Array.isArray(item.explicitAcceptanceEvidenceIds)) throw new Error(`${path}.explicitAcceptanceEvidenceIds 必须是证据编号数组`);
+      if (!Array.isArray(item.explicitAcceptanceEvidenceIds)) throw new DomainValidationError(`${path}.explicitAcceptanceEvidenceIds 必须是证据编号数组`);
       const selected = item.explicitAcceptanceEvidenceIds.length ? resolveEvidenceIds(item.explicitAcceptanceEvidenceIds, catalog, `${path}.explicitAcceptanceEvidenceIds`) : [];
       const byUnit = new Map(catalog.map(evidence => [evidence.id, evidence]));
       const ids = item.explicitAcceptanceEvidenceIds as string[];

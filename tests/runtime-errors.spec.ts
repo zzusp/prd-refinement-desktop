@@ -5,13 +5,61 @@ import path from 'node:path';
 const mocks=vi.hoisted(()=>({spawn:vi.fn(),execFile:vi.fn(),access:vi.fn(),readdir:vi.fn(),writeFile:vi.fn()}));
 vi.mock('node:child_process',()=>({spawn:mocks.spawn,execFile:mocks.execFile}));
 vi.mock('node:fs/promises',()=>({access:mocks.access,mkdir:vi.fn(async()=>{}),readFile:vi.fn(),readdir:mocks.readdir,writeFile:mocks.writeFile}));
-import { CodexCliRuntime, inspectRuntime, runtimeEnvironment } from '../electron/runtime';
+import { CodexCliRuntime, DshJsonRpcRuntime, inspectRuntime, runtimeEnvironment } from '../electron/runtime';
 import type { RuntimeConfig } from '../src/types';
 const config:RuntimeConfig={adapter:'codex-oauth',provider:'',model:'fake',reasoningEffort:'low',maxParallel:1,apiKey:'CONFIG-SECRET'};
 function child(){return Object.assign(new EventEmitter(),{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn()})}
 beforeEach(()=>{mocks.spawn.mockReset();mocks.access.mockReset().mockResolvedValue(undefined);mocks.readdir.mockReset().mockResolvedValue(['1.0']);mocks.writeFile.mockReset().mockResolvedValue(undefined)});
 async function started(){const runtime=new CodexCliRuntime();await runtime.start('test-runtime',config);return runtime}
 async function flushSpawn(){for(let i=0;i<10;i++)await Promise.resolve()}
+const operation={operationId:'detail-batch',instructions:'提交结果',input:{source:'中文'},submission:{name:'submit_details',description:'提交',parameters:{type:'object',properties:{text:{type:'string'}},required:['text'],additionalProperties:false}}};
+describe('类型化 Runtime 操作',()=>{
+  it('生产主入口和调度器不再绕过类型化操作调用普通文本',async()=>{
+    const fs=await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    for(const entry of ['electron/main.ts','electron/scheduler-v2.ts']){
+      const source=await fs.readFile(path.resolve(entry),'utf8');expect(source).not.toContain('.promptAndWait(');expect(source).toContain('executeNode(');
+    }
+  });
+  it('必需 Schema 且 UTF8 中文跨块不损坏，仅完整结束后交付',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);await flushSpawn();
+    const bytes=Buffer.from(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({text:'中文'})}})+'\n');
+    for(const byte of bytes)process.stdout.write(Buffer.from([byte]));
+    process.stdout.write(JSON.stringify({type:'turn.completed',usage:{input_tokens:3,output_tokens:2}}));process.emit('close',0);
+    expect(await pending).toMatchObject({value:{text:'中文'},completion:'completed',usage:{inputTokens:3}});
+    expect(mocks.spawn.mock.calls[0][1]).toContain('--output-schema');
+  });
+  it.each([['{"text":"ok"}',false,'transient'],['broken',true,'protocol'],['[]',true,'protocol']])('拒绝不完整或损坏提交 %s',async(answer,completed,code)=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);const rejected=expect(pending).rejects.toMatchObject({code});await flushSpawn();
+    process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:answer}})+'\n');if(completed)process.stdout.write('{"type":"turn.completed"}\n');process.emit('close',0);await rejected;
+  });
+  it.each([[401,'authentication'],[429,'transient'],[503,'transient']])('原生状态 %s 分类为 %s',async(status,code)=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);const rejected=expect(pending).rejects.toMatchObject({code});await flushSpawn();process.stdout.write(JSON.stringify({type:'turn.failed',error:{status,message:'失败'}})+'\n');process.emit('close',1);await rejected;
+  });
+  it('取消等待进程 close，拒绝迟到成功',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started(),controller=new AbortController();let settled=false;
+    const pending=runtime.executeOperation({...operation,signal:controller.signal}).finally(()=>{settled=true});const rejected=expect(pending).rejects.toMatchObject({code:'cancelled'});await flushSpawn();controller.abort();await flushSpawn();expect(process.kill).toHaveBeenCalledOnce();expect(settled).toBe(false);
+    process.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"{}"}}\n{"type":"turn.completed"}\n');process.emit('close',0);await rejected;
+  });
+  it('超时等待进程 close 后才允许重试',async()=>{
+    vi.useFakeTimers();try{const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();let settled=false;const pending=runtime.executeOperation({...operation,timeoutMs:10}).finally(()=>{settled=true});const rejected=expect(pending).rejects.toMatchObject({code:'transient'});await flushSpawn();await vi.advanceTimersByTimeAsync(11);expect(settled).toBe(false);expect(process.kill).toHaveBeenCalledOnce();process.emit('close',null);await rejected}finally{vi.useRealTimers()}
+  });
+  it('DSH 不支持结构化协议时零调用明确失败',async()=>{await expect(new DshJsonRpcRuntime().executeOperation(operation)).rejects.toMatchObject({code:'capability'});expect(mocks.spawn).not.toHaveBeenCalled()});
+  it('缺失提交 Schema 在进程启动前拒绝',async()=>{const runtime=await started();await expect(runtime.executeOperation({...operation,submission:{...operation.submission,parameters:{}}})).rejects.toMatchObject({code:'capability'});expect(mocks.spawn).not.toHaveBeenCalled()});
+  it('根联合在 Codex wire 中包裹并解码，不改变候选领域对象',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const union={anyOf:[{type:'object',properties:{a:{type:'string'}},required:['a'],additionalProperties:false},{type:'object',properties:{b:{type:'string'}},required:['b'],additionalProperties:false}]};const pending=runtime.executeOperation({...operation,submission:{...operation.submission,parameters:union}});await flushSpawn();
+    expect(JSON.parse(mocks.writeFile.mock.calls.at(-1)![1])).toEqual({type:'object',properties:{result:union},required:['result'],additionalProperties:false});
+    process.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"{\\"result\\":{\\"a\\":\\"中文\\"}}"}}\n{"type":"turn.completed"}\n');process.emit('close',0);expect(await pending).toMatchObject({value:{a:'中文'},completion:'completed'});
+  });
+  it('原生上下文错误不猜文案分类',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);const rejected=expect(pending).rejects.toMatchObject({code:'context'});await flushSpawn();process.stdout.write('{"type":"turn.failed","error":{"code":"context_length_exceeded","message":"失败"}}\n');process.emit('close',1);await rejected;
+  });
+  it('CLI 包装的 JSON 供应商错误仍按 code 分类',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);const rejected=expect(pending).rejects.toMatchObject({code:'capability'});await flushSpawn();process.stdout.write(JSON.stringify({type:'turn.failed',error:{message:JSON.stringify({error:{code:'invalid_json_schema',message:'schema无效'},status:400})}})+'\n');process.emit('close',1);await rejected;
+  });
+  it('stop 等待 close 并禁止迟到成功',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.executeOperation(operation);const rejected=expect(pending).rejects.toMatchObject({code:'cancelled'});await flushSpawn();let stopped=false;const stopping=runtime.stop().then(()=>{stopped=true});await flushSpawn();expect(stopped).toBe(false);process.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"{}"}}\n{"type":"turn.completed"}\n');process.emit('close',0);await rejected;await stopping;expect(stopped).toBe(true);
+  });
+});
 describe('Codex 每调用结构化错误',()=>{
   it('显式代理同时注入大小写 HTTP 环境变量且不改写进程环境',()=>{
     const before=process.env.HTTPS_PROXY;

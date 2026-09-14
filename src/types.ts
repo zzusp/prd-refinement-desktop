@@ -380,6 +380,13 @@ export interface PromptCallMetric {
   requestHash:string;
 }
 
+export interface NodeValidationIssue { code:string; path:string; expected:string; actual:string; relatedIds?:string[] }
+export interface NodeExecutionReceipt {
+  nodeId:string; contractVersion:number; workItemId:string; inputHash:string; input:unknown;
+  status:'running'|'succeeded'|'failed'; result?:unknown;
+  attempts:Array<{executionId:string;calls:number;transientRetries:number;protocolRetries:number;repairs:number;status:'running'|'succeeded'|'failed';inFlight?:boolean;error?:string;usage?:RuntimeCallMetric[];errors?:Array<{code:string;message:string;at:number}>;candidates:Array<{value:unknown;issues:NodeValidationIssue[];at:number}>}>;
+}
+
 export interface AnalysisTask {
   id: string;
   operationId?: string;
@@ -396,7 +403,8 @@ export interface AnalysisTask {
   runtimeConfig?: RuntimeConfigSnapshot;
   attempt: number;
   checkpoint?: {
-    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
+    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22;
+    nodeReceipts?: Record<string,NodeExecutionReceipt>;
     clarificationResults?: { dependencyHash: string; results: Record<string, { status: 'candidate' | 'verified' | 'rejected'; value?: unknown; attempts: number; feedback?: string }> };
     resultVersion?:number;
     checks?:Partial<Record<RequiredCheckId,AnalysisCheckRecord>>;

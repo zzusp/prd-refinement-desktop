@@ -1,3 +1,4 @@
+import { DomainValidationError } from './node-validation.js';
 import type { AuditCategory, AuditIssue, Clarification, PrdProject, RequirementDetail, RequirementRule } from '../src/types.js';
 import { acceptDirectClarifications, acceptDirectDetails, validateDirectGraph } from './domain.js';
 
@@ -75,28 +76,28 @@ export function planDetailRepairs(issues:AuditIssue[],project:PrdProject):Repair
   ].filter(id=>!scope.requirementIds.includes(id)))}));
 }
 
-function stringList(value:unknown,label:string):string[]{if(!Array.isArray(value)||value.some(item=>typeof item!=='string'||!item.trim()))throw new Error(`${label} 必须为字符串数组`);if(new Set(value).size!==value.length)throw new Error(`${label} 含重复项`);return value as string[]}
-function requiredText(value:unknown,label:string):string{if(typeof value!=='string'||!value.trim())throw new Error(`${label} 必须为非空字符串`);return value}
-function record(value:unknown):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('增量项必须为对象');return value as Record<string,unknown>}
+function stringList(value:unknown,label:string):string[]{if(!Array.isArray(value)||value.some(item=>typeof item!=='string'||!item.trim()))throw new DomainValidationError(`${label} 必须为字符串数组`);if(new Set(value).size!==value.length)throw new DomainValidationError(`${label} 含重复项`);return value as string[]}
+function requiredText(value:unknown,label:string):string{if(typeof value!=='string'||!value.trim())throw new DomainValidationError(`${label} 必须为非空字符串`);return value}
+function record(value:unknown):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value))throw new DomainValidationError('增量项必须为对象');return value as Record<string,unknown>}
 
 export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:RepairScope):RequirementPatch {
   const raw=record(value);
-  if(Object.keys(raw).some(key=>!['requirements','deleteRequirementIds','clarifications','deleteClarificationIds'].includes(key)))throw new Error('增量包含未知字段');
-  if(!Array.isArray(raw.requirements)||!Array.isArray(raw.clarifications))throw new Error('增量必须包含 requirements 和 clarifications 数组');
+  if(Object.keys(raw).some(key=>!['requirements','deleteRequirementIds','clarifications','deleteClarificationIds'].includes(key)))throw new DomainValidationError('增量包含未知字段');
+  if(!Array.isArray(raw.requirements)||!Array.isArray(raw.clarifications))throw new DomainValidationError('增量必须包含 requirements 和 clarifications 数组');
   const sourceUnits=project.sourceUnits.filter(unit=>scope.sourceUnitIds.includes(unit.id));
   const rawRequirements=raw.requirements;
   const accepted=acceptDirectDetails(rawRequirements,[],sourceUnits,true).requirements;
   const existing=new Set([...project.requirements,...project.clarifications,...project.features,...project.sourceUnits].map(item=>item.id));
-  const checkId=(id:string,allowed:string[])=>{if(existing.has(id)){if(!allowed.includes(id))throw new Error(`越界修改 ${id}`)}else if(!/^LOCAL-[A-Za-z0-9_-]+$/.test(id))throw new Error(`新增项 ${id} 必须使用 LOCAL- ID`)};
+  const checkId=(id:string,allowed:string[])=>{if(existing.has(id)){if(!allowed.includes(id))throw new DomainValidationError(`越界修改 ${id}`)}else if(!/^LOCAL-[A-Za-z0-9_-]+$/.test(id))throw new DomainValidationError(`新增项 ${id} 必须使用 LOCAL- ID`)};
   const requirements=accepted.map((item,index)=>{
     checkId(item.id,scope.requirementIds);
     const content=(entry:RequirementDetail)=>JSON.stringify([entry.title,entry.behavior,entry.conditions,entry.constraints,entry.explicitAcceptanceConditions,[...entry.sourceUnitIds].sort(),entry.state]);
-    if(!existing.has(item.id)&&project.requirements.some(other=>!scope.requirementIds.includes(other.id)&&content(other)===content(item)))throw new Error(`${item.id} 复制了范围外需求`);
+    if(!existing.has(item.id)&&project.requirements.some(other=>!scope.requirementIds.includes(other.id)&&content(other)===content(item)))throw new DomainValidationError(`${item.id} 复制了范围外需求`);
     const owners=project.features.filter(feature=>feature.requirementIds.includes(item.id));
     const requested=record(rawRequirements[index]).featureId;
     const featureId=requested===undefined?(owners.length===1?owners[0].id:scope.featureIds.length===1?scope.featureIds[0]:''):requiredText(requested,'featureId');
-    if(!scope.featureIds.includes(featureId))throw new Error(`${item.id} 必须指定范围内主功能`);
-    if(existing.has(item.id)&&(owners.length!==1||owners[0].id!==featureId))throw new Error(`${item.id} 不允许通过明细修正更改主功能`);
+    if(!scope.featureIds.includes(featureId))throw new DomainValidationError(`${item.id} 必须指定范围内主功能`);
+    if(existing.has(item.id)&&(owners.length!==1||owners[0].id!==featureId))throw new DomainValidationError(`${item.id} 不允许通过明细修正更改主功能`);
     return {...item,featureId};
   });
   const allowedRefs=new Set([...scope.sourceUnitIds,...scope.requirementIds,...requirements.map(item=>item.id)]);
@@ -107,15 +108,15 @@ export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:Re
     const previous=project.clarifications.find(question=>question.id===id);
     const retainedRefs=new Set(previous?.affectedIds.filter(ref=>scope.readOnlyRequirementIds?.includes(ref))??[]);
     const affectedIds=item.affectedIds;
-    if(!affectedIds.length||affectedIds.some(ref=>!allowedRefs.has(ref)&&!retainedRefs.has(ref)))throw new Error(`${id} 引用越出修正范围`);
-    if(!existing.has(id)&&project.clarifications.some(other=>!scope.clarificationIds.includes(other.id)&&other.question===item.question&&other.reason===item.reason&&JSON.stringify([...other.affectedIds].sort())===JSON.stringify([...affectedIds].sort())))throw new Error(`${id} 复制了范围外澄清`);
+    if(!affectedIds.length||affectedIds.some(ref=>!allowedRefs.has(ref)&&!retainedRefs.has(ref)))throw new DomainValidationError(`${id} 引用越出修正范围`);
+    if(!existing.has(id)&&project.clarifications.some(other=>!scope.clarificationIds.includes(other.id)&&other.question===item.question&&other.reason===item.reason&&JSON.stringify([...other.affectedIds].sort())===JSON.stringify([...affectedIds].sort())))throw new DomainValidationError(`${id} 复制了范围外澄清`);
     return{...item,affectedIds};
   });
   const deleteRequirementIds=stringList(raw.deleteRequirementIds,'deleteRequirementIds'),deleteClarificationIds=stringList(raw.deleteClarificationIds,'deleteClarificationIds');
-  for(const id of deleteRequirementIds)if(!scope.requirementIds.includes(id))throw new Error(`越界删除 ${id}`);
-  for(const id of deleteClarificationIds)if(!scope.clarificationIds.includes(id))throw new Error(`越界删除 ${id}`);
-  const ids=[...requirements,...clarifications].map(item=>item.id);if(new Set(ids).size!==ids.length)throw new Error('增量产生重复 ID');
-  if(ids.some(id=>deleteRequirementIds.includes(id)||deleteClarificationIds.includes(id)))throw new Error('同一条目不能同时修改与删除');
+  for(const id of deleteRequirementIds)if(!scope.requirementIds.includes(id))throw new DomainValidationError(`越界删除 ${id}`);
+  for(const id of deleteClarificationIds)if(!scope.clarificationIds.includes(id))throw new DomainValidationError(`越界删除 ${id}`);
+  const ids=[...requirements,...clarifications].map(item=>item.id);if(new Set(ids).size!==ids.length)throw new DomainValidationError('增量产生重复 ID');
+  if(ids.some(id=>deleteRequirementIds.includes(id)||deleteClarificationIds.includes(id)))throw new DomainValidationError('同一条目不能同时修改与删除');
   return {requirements,clarifications,deleteRequirementIds,deleteClarificationIds};
 }
 
@@ -139,17 +140,17 @@ export function applyRequirementPatch(project:PrdProject,scope:RepairScope,patch
   const graph=validateDirectGraph(result.sourceUnits,result.sourceDispositions??[],result.features,result.requirements,result.clarifications);
   const required=new Set(scope.requiredSourceUnitIds);
   const invalid=graph.uncovered.filter(item=>!resolvedSourceUnitIds.has(item.sourceUnitId)&&(!previouslyUncovered.has(item.sourceUnitId)||required.has(item.sourceUnitId)));
-  if(invalid.length)throw new Error(`增量修正仍有未覆盖原文：${invalid.map(item=>item.sourceUnitId).join('、')}`);
+  if(invalid.length)throw new DomainValidationError(`增量修正仍有未覆盖原文：${invalid.map(item=>item.sourceUnitId).join('、')}`);
   return result;
 }
 
 export function validateRepair(before:RequirementDetail[], candidate:RequirementDetail[], project:PrdProject) {
   const ids=new Set(before.map(item=>item.id));
-  if(candidate.length!==before.length||candidate.some(item=>!ids.has(item.id)))throw new Error('定点返工必须保留本功能全部需求ID');
+  if(candidate.length!==before.length||candidate.some(item=>!ids.has(item.id)))throw new DomainValidationError('定点返工必须保留本功能全部需求ID');
   const covered=new Set(candidate.flatMap(item=>item.ruleIds));
   const explicit=new Set((project.rules??[]).filter(rule=>rule.status==='explicit').map(rule=>rule.id));
-  for(const id of before.flatMap(item=>item.ruleIds))if(explicit.has(id)&&!covered.has(id))throw new Error(`返工丢失明确规则 ${id}`);
-  for(const item of candidate)if(!item.ruleIds.some(id=>explicit.has(id)))throw new Error(`返工项 ${item.id} 仅引用待确认规则，不能作为确定需求`);
+  for(const id of before.flatMap(item=>item.ruleIds))if(explicit.has(id)&&!covered.has(id))throw new DomainValidationError(`返工丢失明确规则 ${id}`);
+  for(const item of candidate)if(!item.ruleIds.some(id=>explicit.has(id)))throw new DomainValidationError(`返工项 ${item.id} 仅引用待确认规则，不能作为确定需求`);
 }
 
 export const repairInstructions='仅修复 issues 指出的本功能需求明细偏差，依据原文，不增加业务假设，不解答待确认问题，不生成测试场景。explicitAcceptanceConditions仅能逐字引用原文明示的验收条件，普通字段规则或枚举不能改写成验收场景；没有则返回空数组。返回本功能全部 requirements；必须保留已有需求 ID 和全部明确规则覆盖，不修改其他功能。若提供功能说明，返回 feature（id,name,goal,sourceUnitIds,ruleIds,state），保留功能ID与规则归属，仅校正名称及目标中的无依据表达。每项包含 id,title,behavior,conditions, constraints,explicitAcceptanceConditions,sourceUnitIds,ruleIds,state；state只能draft或needs-clarification。输出 {"requirements":[...],"clarifications":[],"feature":{...}}。';
@@ -158,10 +159,10 @@ export function nextRuleId(rules:RequirementRule[]){return Math.max(0,...rules.m
 
 export function applyRuleRepair(current:RequirementRule[], removeIds:string[], replacements:RequirementRule[]) {
   const removable=new Set(removeIds), known=new Set(current.map(rule=>rule.id));
-  for(const id of removable)if(!known.has(id))throw new Error(`规则返工试图删除不存在的规则 ${id}`);
+  for(const id of removable)if(!known.has(id))throw new DomainValidationError(`规则返工试图删除不存在的规则 ${id}`);
   let next=nextRuleId(current);
   const normalized=replacements.map(rule=>({...rule,id:rule.id.startsWith('RL-')&&removable.has(rule.id)?rule.id:`RL-${String(next++).padStart(4,'0')}`}));
-  const ids=new Set(normalized.map(rule=>rule.id));if(ids.size!==normalized.length)throw new Error('规则返工产生重复ID');
+  const ids=new Set(normalized.map(rule=>rule.id));if(ids.size!==normalized.length)throw new DomainValidationError('规则返工产生重复ID');
   return current.filter(rule=>!removable.has(rule.id)).concat(normalized);
 }
 

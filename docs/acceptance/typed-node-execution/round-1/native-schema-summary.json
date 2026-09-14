@@ -1,0 +1,652 @@
+{
+  "purpose": "无业务数据的原生Schema接受性与canonical候选验收；不是业务语义质量验收",
+  "finalRound": "schema-probe-1789373157460",
+  "finalResult": "13/13 baseline plus 2/2 latest details/repair delta completed and canonicalValid",
+  "notes": [
+    "初轮luna容量满不能当作Schema被接受",
+    "oneOf转换、optional presence union、unify allocations及根union result封装均在后续轮验证",
+    "未保留认证信息和提示词全文；时间为UTC",
+    "末轮为13节点全通后的details/repair增量：details禁止featureId；repair候选Schema未变。输入证据必需非空是本地Input契约约束，不以此无业务数据传输探针替代其测试。"
+  ],
+  "rounds": [
+    {
+      "directory": "schema-probe-1789372059937",
+      "results": [
+        {
+          "node": "candidates",
+          "startedAt": "2026-09-14T07:47:41.566063Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "b7be0e083a0d0e96617577c25f670efd598530e73a210e6ef7f38268f6a968bb",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'features', 'items'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "image",
+          "startedAt": "2026-09-14T07:47:41.572575Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "548a669a44f0dae19f701cb2d802e0c36a1bfb8c64d3e6d77250c3767ab4ea0a",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Selected model is at capacity. Please try a different model."
+          ]
+        },
+        {
+          "node": "inputInterpretation",
+          "startedAt": "2026-09-14T07:47:41.619380Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "df516988f8af531b53bef0927db6ea0ca1cb0e7baff448bcd6cc0bc1549c9d49",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Selected model is at capacity. Please try a different model."
+          ]
+        },
+        {
+          "node": "details",
+          "startedAt": "2026-09-14T07:47:48.703081Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "b304ce1858a10c00e8037d57e1497a96b998365ada6538a18472f0f669628673",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'requirements', 'items'), 'required' is required to be supplied and to be an array including every key in properties. Missing 'featureId'."
+          ]
+        },
+        {
+          "node": "unify",
+          "startedAt": "2026-09-14T07:47:46.947775Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "e552f9ed65736e368f52567a4994c061486bf0d2a22acaf2bfffb46291b27858",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('anyOf', '0', 'properties', 'features', 'items'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "audit",
+          "startedAt": "2026-09-14T07:47:49.233316Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "97c6c01ac11e7d343b9fd1f72043cccb6c5aa5ea3c65a1a80071a2966457d1b4",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'issues', 'items', 'anyOf', '0', 'properties', 'clarification'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "repairReview",
+          "startedAt": "2026-09-14T07:47:55.201478Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "8b355d68747f76435735870daa2cd7863d480eb9f115b8f327f58d12b196ad69",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'introducedIssues', 'items', 'anyOf', '0', 'properties', 'clarification'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "repair",
+          "startedAt": "2026-09-14T07:47:54.912150Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "25bd3649cf67ede7b5b9b569d9c3c5722baf7f9ab7a023c1b634ec23fa74db98",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'requirements', 'items'), 'required' is required to be supplied and to be an array including every key in properties. Missing 'featureId'."
+          ]
+        },
+        {
+          "node": "resolutionProposals",
+          "startedAt": "2026-09-14T07:47:55.353186Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "3263e276a5a8d4660341173f2571f3484f81bcb94c089e8ee26ce44f6330aa2a",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Selected model is at capacity. Please try a different model."
+          ]
+        },
+        {
+          "node": "adjustmentGenerate",
+          "startedAt": "2026-09-14T07:48:01.832143Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "0e615e0b0214a651f2c8756a667769bd7748813b3226906e4e494a3568a22908",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'requirementActions', 'items'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "adjustmentRepair",
+          "startedAt": "2026-09-14T07:48:01.888591Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "0e615e0b0214a651f2c8756a667769bd7748813b3226906e4e494a3568a22908",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'requirementActions', 'items'), 'oneOf' is not permitted."
+          ]
+        },
+        {
+          "node": "adjustmentParse",
+          "startedAt": "2026-09-14T07:48:01.693461Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "cff8f9f8c384ad8de11adfe34051236ca2cf0075421c5dbc8c7d139b11df371f",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('properties', 'operations', 'items'), 'required' is required to be supplied and to be an array including every key in properties. Missing 'atomicGroupId'."
+          ]
+        },
+        {
+          "node": "adjustmentReview",
+          "startedAt": "2026-09-14T07:48:07.819068Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-luna",
+          "schemaHash": "fac69d957baed0c8a59db9ddf5c18e27a82bb0b2e73d3990370acf553959bd79",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Selected model is at capacity. Please try a different model."
+          ]
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789372184432",
+      "results": [
+        {
+          "node": "image",
+          "startedAt": "2026-09-14T07:49:45.967823Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "548a669a44f0dae19f701cb2d802e0c36a1bfb8c64d3e6d77250c3767ab4ea0a",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "candidates",
+          "startedAt": "2026-09-14T07:49:45.996727Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "0ec2e7b27ca439c1d292264f0a38e4c773151d814eda371e0c0852908229ed87",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "inputInterpretation",
+          "startedAt": "2026-09-14T07:49:46.017959Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "df516988f8af531b53bef0927db6ea0ca1cb0e7baff448bcd6cc0bc1549c9d49",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "unify",
+          "startedAt": "2026-09-14T07:50:00.905877Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "6e1f52645e0eb5a08089140e5ebfdcc25a85ec109a9e6856299b4e4408a08cf6",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': In context=('anyOf', '0', 'properties', 'candidateMappings', 'items', 'anyOf', '1', 'properties', 'evidenceIdsByFeature'), 'propertyNames' is not permitted."
+          ]
+        },
+        {
+          "node": "details",
+          "startedAt": "2026-09-14T07:50:00.995863Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "b94189b71c793429de87f9ea057168d6ee3d2e0a00fba8f6f331041a53b719af",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "audit",
+          "startedAt": "2026-09-14T07:50:01.696677Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "a2c78c77bca6f327cad12205912e696a6cbddb2eb7f7d8b026555c70da2885c0",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "repair",
+          "startedAt": "2026-09-14T07:50:07.152516Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "a388d1fc810c66b00902b66c2e881d6a64d7972836190ea4d5d5c08080cfd0b6",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "repairReview",
+          "startedAt": "2026-09-14T07:50:14.223319Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "340fe4129912e75315d706ff93314e4c48e7429a881cb0e743c0a91e4d57b6a4",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "resolutionProposals",
+          "startedAt": "2026-09-14T07:50:14.550439Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "3263e276a5a8d4660341173f2571f3484f81bcb94c089e8ee26ce44f6330aa2a",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentParse",
+          "startedAt": "2026-09-14T07:50:21.030952Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "08c98a7144435c71af30975228966769b22c9c66f82f926ca5ed69693c862a89",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentRepair",
+          "startedAt": "2026-09-14T07:50:29.580490Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "036e86809face0b4ecc7ad09736e2e7afb8a0eda13a9ded0c2b3a434a3c30b88",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentReview",
+          "startedAt": "2026-09-14T07:50:33.644980Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "fac69d957baed0c8a59db9ddf5c18e27a82bb0b2e73d3990370acf553959bd79",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentGenerate",
+          "startedAt": "2026-09-14T07:50:28.166347Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "036e86809face0b4ecc7ad09736e2e7afb8a0eda13a9ded0c2b3a434a3c30b88",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789372236730",
+      "results": [
+        {
+          "node": "root-union-probe",
+          "startedAt": "2026-09-14T07:50:37.274700Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "488d52f625cf1e8a419f99f45053502988eb0da6ec0ad5396da1648fa7beb32d",
+          "rootWrapped": false,
+          "exitCode": 1,
+          "completed": false,
+          "canonicalValid": false,
+          "errors": [
+            "Invalid schema for response_format 'codex_output_schema': schema must be a JSON Schema of 'type: \"object\"', got 'type: \"None\"'."
+          ]
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789372275756",
+      "results": [
+        {
+          "node": "root-union-probe",
+          "startedAt": "2026-09-14T07:51:17.565620Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "00c1e69b2b27c7d4bad7163d11fc96252b8e22eb7d73c16941601887c3661c80",
+          "rootWrapped": true,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789372335495",
+      "results": [
+        {
+          "node": "unify",
+          "startedAt": "2026-09-14T07:52:17.077668Z",
+          "timeSource": "CLI-stderr-first-event",
+          "completedAt": null,
+          "model": "gpt-5.6-terra",
+          "schemaHash": "6fa02b93fc7c721dc2c59f9b7078be3fa0eb86624c3da82c7aed0582f01d353f",
+          "rootWrapped": true,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789372406837",
+      "results": [
+        {
+          "node": "inputInterpretation",
+          "startedAt": "2026-09-14T07:53:27.094Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:53:49.110Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "df516988f8af531b53bef0927db6ea0ca1cb0e7baff448bcd6cc0bc1549c9d49",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "candidates",
+          "startedAt": "2026-09-14T07:53:27.094Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:53:50.454Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "0ec2e7b27ca439c1d292264f0a38e4c773151d814eda371e0c0852908229ed87",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "image",
+          "startedAt": "2026-09-14T07:53:27.092Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:53:51.085Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "548a669a44f0dae19f701cb2d802e0c36a1bfb8c64d3e6d77250c3767ab4ea0a",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "audit",
+          "startedAt": "2026-09-14T07:53:51.089Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:02.545Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "a2c78c77bca6f327cad12205912e696a6cbddb2eb7f7d8b026555c70da2885c0",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "details",
+          "startedAt": "2026-09-14T07:53:50.457Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:04.311Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "b94189b71c793429de87f9ea057168d6ee3d2e0a00fba8f6f331041a53b719af",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "unify",
+          "startedAt": "2026-09-14T07:53:49.118Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:06.129Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "6fa02b93fc7c721dc2c59f9b7078be3fa0eb86624c3da82c7aed0582f01d353f",
+          "rootWrapped": true,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "repair",
+          "startedAt": "2026-09-14T07:54:02.551Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:19.658Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "a388d1fc810c66b00902b66c2e881d6a64d7972836190ea4d5d5c08080cfd0b6",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "repairReview",
+          "startedAt": "2026-09-14T07:54:04.317Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:20.720Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "340fe4129912e75315d706ff93314e4c48e7429a881cb0e743c0a91e4d57b6a4",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "resolutionProposals",
+          "startedAt": "2026-09-14T07:54:06.132Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:20.879Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "3263e276a5a8d4660341173f2571f3484f81bcb94c089e8ee26ce44f6330aa2a",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentParse",
+          "startedAt": "2026-09-14T07:54:19.662Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:39.244Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "08c98a7144435c71af30975228966769b22c9c66f82f926ca5ed69693c862a89",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentRepair",
+          "startedAt": "2026-09-14T07:54:20.884Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:40.568Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "036e86809face0b4ecc7ad09736e2e7afb8a0eda13a9ded0c2b3a434a3c30b88",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentGenerate",
+          "startedAt": "2026-09-14T07:54:20.725Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:41.020Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "036e86809face0b4ecc7ad09736e2e7afb8a0eda13a9ded0c2b3a434a3c30b88",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "adjustmentReview",
+          "startedAt": "2026-09-14T07:54:39.246Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T07:54:56.364Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "fac69d957baed0c8a59db9ddf5c18e27a82bb0b2e73d3990370acf553959bd79",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "directory": "schema-probe-1789373157460",
+      "scope": "delta-after-13-of-13",
+      "results": [
+        {
+          "node": "repair",
+          "startedAt": "2026-09-14T08:05:57.862Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T08:06:09.014Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "a388d1fc810c66b00902b66c2e881d6a64d7972836190ea4d5d5c08080cfd0b6",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        },
+        {
+          "node": "details",
+          "startedAt": "2026-09-14T08:05:57.857Z",
+          "timeSource": "probe-start",
+          "completedAt": "2026-09-14T08:06:13.550Z",
+          "model": "gpt-5.6-terra",
+          "schemaHash": "9ce778ff2ed0c3235540afc46f78eebe68715214c318ee15f7e5ba3c3b27756c",
+          "rootWrapped": false,
+          "exitCode": 0,
+          "completed": true,
+          "canonicalValid": true,
+          "errors": []
+        }
+      ]
+    }
+  ],
+  "baselineFullRound": "schema-probe-1789372406837"
+}

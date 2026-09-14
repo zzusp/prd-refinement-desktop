@@ -1,0 +1,14 @@
+case,round,status,evidence
+runtime-contract,1,PASS,tests/runtime-errors.spec.ts
+node-contracts,1,PASS,tests/node-contracts.test.ts
+retry-repair,1,PASS,tests/node-executor.spec.ts
+batch-recovery,1,PASS,tests/scheduler.spec.ts
+all-entrypoints,1,PASS,tests/runtime-errors.spec.ts
+typecheck-tests-build,1,PASS,round-3.md
+native-schema,1,FAIL,round-1/native-schema-summary.json
+native-schema,2,PASS,round-1/native-schema-summary.json
+original-failure-regression,1,BLOCKED,round-1.md
+original-failure-regression,2,PASS,round-2.md
+real-task,4,PASS,round-4.md
+desktop,4,PASS,round-4.md
+package-integrity,4,PASS,round-4/package-readback.json

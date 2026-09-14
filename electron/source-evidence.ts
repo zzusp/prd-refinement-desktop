@@ -76,7 +76,6 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
     if (!current || typeof current !== 'object') return current;
     const item = { ...(current as Record<string, unknown>) };
     // 生成候选的初始状态属于平台，不要求模型提交内部生命周期字段。
-    if(typeof item.question==='string'&&typeof item.level==='string'&&Object.prototype.hasOwnProperty.call(item,'evidenceIds'))item.state='open';
     if(Array.isArray(item.features))item.features=item.features.map(raw=>raw&&typeof raw==='object'?{...raw,state:'draft'}:raw);
     if (catalog.length && Array.isArray(item.sourceRefs) && item.sourceRefs.some(raw => raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'quote'))) throw new DomainValidationError(`${path}.sourceRefs 不得包含模型抄写的 quote，请选择 evidenceIds`);
     if (Object.prototype.hasOwnProperty.call(item, 'evidenceIds')) {
@@ -96,64 +95,26 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
       }));
       delete item.allocations;
     }
-    if (Object.prototype.hasOwnProperty.call(item, 'explicitAcceptanceEvidenceIds')) {
-      if (!Array.isArray(item.explicitAcceptanceEvidenceIds)) throw new DomainValidationError(`${path}.explicitAcceptanceEvidenceIds 必须是证据编号数组`);
-      const selected = item.explicitAcceptanceEvidenceIds.length ? resolveEvidenceIds(item.explicitAcceptanceEvidenceIds, catalog, `${path}.explicitAcceptanceEvidenceIds`) : [];
-      const byUnit = new Map(catalog.map(evidence => [evidence.id, evidence]));
-      const ids = item.explicitAcceptanceEvidenceIds as string[];
-      item.explicitAcceptanceConditions = ids.map(id => byUnit.get(id)!.text);
-      const bindings = item.evidenceBindings && typeof item.evidenceBindings === 'object' && !Array.isArray(item.evidenceBindings) ? { ...(item.evidenceBindings as Record<string, unknown>) } : {};
-      bindings.explicitAcceptanceConditions = selected.map(ref => [ref]);
-      item.evidenceBindings = bindings;
-      delete item.explicitAcceptanceEvidenceIds;
-    }
-    if (item.evidenceBindings && typeof item.evidenceBindings === 'object' && !Array.isArray(item.evidenceBindings)) {
-      const bindings = { ...(item.evidenceBindings as Record<string, unknown>) };
-      for (const key of ['behavior', 'conditions', 'constraints', 'explicitAcceptanceConditions']) {
-        const raw = bindings[key];
-        if (!Array.isArray(raw)) continue;
-        if (key === 'behavior') {
-          if (raw.every(value => typeof value === 'string')) bindings[key] = resolveEvidenceIds(raw, catalog, `${path}.evidenceBindings.${key}`);
-        } else bindings[key] = raw.map((ids, index) => Array.isArray(ids) && ids.every(value => typeof value === 'string') ? resolveEvidenceIds(ids, catalog, `${path}.evidenceBindings.${key}[${index}]`) : ids);
-      }
-      item.evidenceBindings = bindings;
-      const collect = (value: unknown): SourceRef[] => Array.isArray(value) ? value.flatMap(collect) : value && typeof value === 'object' && typeof (value as SourceRef).sourceUnitId === 'string' ? [value as SourceRef] : [];
-      const selected = Object.values(bindings).flatMap(collect);
-      if (selected.length) item.sourceUnitIds = [...new Set(selected.map(ref => ref.sourceUnitId))];
-    }
     for (const [key, child] of Object.entries(item)) item[key] = visit(child, `${path}.${key}`);
     return item;
   };
   return visit(value, 'response') as Record<string, unknown>;
 }
 
-/** 细化节点只返回内容与证据对；来源、绑定和初始状态由程序确定性生成。 */
-export function materializeDetailEvidenceSelections(value:Record<string,unknown>,catalog:SourceEvidence[]):Record<string,unknown> {
-  const issues:DetailEvidenceIssue[]=[],byId=new Map(catalog.map(item=>[item.id,item]));
-  const actual=(value:unknown)=>Array.isArray(value)?`数组(${value.length})`:value===null?'null':typeof value;
-  const requiredText=(value:unknown,path:string)=>{if(typeof value!=='string'){issues.push({code:'type',path,expected:'非空文本',actual:actual(value)});return''}if(!value.trim()){issues.push({code:'empty',path,expected:'非空文本',actual:'空文本'});return''}return value.trim()};
-  const evidenceIds=(value:unknown,path:string,allowEmpty=false)=>{
-    if(!Array.isArray(value)){issues.push({code:'type',path,expected:allowEmpty?'证据编号数组':'非空证据编号数组',actual:actual(value)});return[] as string[]}
-    if(!allowEmpty&&!value.length)issues.push({code:'empty',path,expected:'非空证据编号数组',actual:'空数组'});
-    const ids:string[]=[];for(const [index,item] of value.entries()){if(typeof item!=='string'||!item.trim()){issues.push({code:'type',path:`${path}[${index}]`,expected:'非空证据编号',actual:actual(item)});continue}const id=item.trim();if(!byId.has(id))issues.push({code:'unknown-evidence',path:`${path}[${index}]`,expected:'本批 evidenceCatalog 中的证据编号',actual:id});ids.push(id)}
-    if(new Set(ids).size!==ids.length)issues.push({code:'duplicate',path,expected:'不重复的证据编号',actual:'包含重复项'});return ids;
-  };
-  const record=(raw:unknown,path:string)=>{if(!raw||typeof raw!=='object'||Array.isArray(raw)){issues.push({code:'type',path,expected:'对象',actual:actual(raw)});return undefined}return raw as Record<string,unknown>};
-  const paired=(raw:unknown,path:string)=>{const item=record(raw,path);if(!item)return{text:'',ids:[] as string[]};const unknown=Object.keys(item).filter(key=>!['text','evidenceIds'].includes(key));for(const key of unknown)issues.push({code:'unknown-field',path:`${path}.${key}`,expected:'仅 text、evidenceIds',actual:'未知字段'});return{text:requiredText(item.text,`${path}.text`),ids:evidenceIds(item.evidenceIds,`${path}.evidenceIds`)};};
-  const pairedList=(raw:unknown,path:string)=>{if(!Array.isArray(raw)){issues.push({code:'type',path,expected:'内容与证据对象数组',actual:actual(raw)});return[] as Array<{text:string;ids:string[]}>}return raw.map((item,index)=>paired(item,`${path}[${index}]`));};
-  if(!Array.isArray(value.requirements))issues.push({code:'type',path:'requirements',expected:'需求对象数组',actual:actual(value.requirements)});
-  const seen=new Set<string>();const requirements=(Array.isArray(value.requirements)?value.requirements:[]).map((raw,index)=>{
-    const path=`requirements[${index}]`,item=record(raw,path);if(!item)return undefined;
-    const allowed=new Set(['id','title','behavior','conditions','constraints','explicitAcceptanceEvidenceIds','featureId']);
-    for(const key of Object.keys(item).filter(key=>!allowed.has(key)))issues.push({code:'unknown-field',path:`${path}.${key}`,expected:'当前细化输出字段',actual:'未知或程序生成字段'});
-    const id=requiredText(item.id,`${path}.id`),title=requiredText(item.title,`${path}.title`);if(id){if(seen.has(id))issues.push({code:'duplicate',path:`${path}.id`,expected:'唯一需求 ID',actual:id});seen.add(id)}
-    const behavior=paired(item.behavior,`${path}.behavior`),conditions=pairedList(item.conditions,`${path}.conditions`),constraints=pairedList(item.constraints,`${path}.constraints`),acceptanceIds=evidenceIds(item.explicitAcceptanceEvidenceIds,`${path}.explicitAcceptanceEvidenceIds`,true);
-    const featureId=item.featureId===undefined?undefined:requiredText(item.featureId,`${path}.featureId`),refs=(ids:string[])=>ids.flatMap(id=>{const evidence=byId.get(id);return evidence?[{sourceUnitId:evidence.sourceUnitId,start:evidence.start,end:evidence.end}]:[]});
-    const behaviorRefs=refs(behavior.ids),conditionRefs=conditions.map(entry=>refs(entry.ids)),constraintRefs=constraints.map(entry=>refs(entry.ids)),acceptanceRefs=refs(acceptanceIds),allRefs=[...behaviorRefs,...conditionRefs.flat(),...constraintRefs.flat(),...acceptanceRefs];
-    return{id,title,behavior:behavior.text,conditions:conditions.map(entry=>entry.text),constraints:constraints.map(entry=>entry.text),explicitAcceptanceConditions:acceptanceIds.map(id=>byId.get(id)?.text??''),sourceUnitIds:[...new Set(allRefs.map(ref=>ref.sourceUnitId))],ruleIds:[],state:'draft',evidenceBindings:{behavior:behaviorRefs,conditions:conditionRefs,constraints:constraintRefs,explicitAcceptanceConditions:acceptanceRefs.map(ref=>[ref])},...(featureId?{featureId}:{})} satisfies RequirementDetail&{featureId?:string};
-  }).filter((item):item is NonNullable<typeof item>=>!!item);
-  if(issues.length)throw new DetailEvidenceValidationError(issues);
-  return materializeEvidenceSelections({...value,requirements},catalog);
+/** 只物化短文本和条目级原文引用，空澄清数组属于内部存储结构。 */
+export function materializeDetailEvidenceSelections(value:Record<string,unknown>,catalog:SourceEvidence[],featureId?:string):Record<string,unknown> {
+  if(Object.keys(value).some(key=>!['requirements','deleteRequirementIds'].includes(key)))throw new DomainValidationError('需求细化只允许 requirements 和修正删除编号，不允许问题、建议或澄清字段');
+  if(!Array.isArray(value.requirements))throw new DomainValidationError('requirements 必须为数组');
+  const requirements=value.requirements.map((raw,index)=>{
+    if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new DomainValidationError('需求项必须为对象');
+    const item=raw as Record<string,unknown>,allowed=new Set(['id','text','evidenceIds','featureId']);
+    if(Object.keys(item).some(key=>!allowed.has(key)))throw new DomainValidationError('需求项包含旧规格书或内部字段');
+    const id=typeof item.id==='string'?item.id.trim():'',text=typeof item.text==='string'?item.text.trim():'',owner=item.featureId??featureId;
+    if(!id||!text||typeof owner!=='string'||!owner.trim())throw new DomainValidationError(`requirements[${index}] 缺少编号、短文本或所属功能`);
+    if(featureId&&item.featureId!==undefined&&item.featureId!==featureId)throw new DomainValidationError('需求所属功能越界');
+    return {id,text,featureId:owner,sourceRefs:resolveEvidenceIds(item.evidenceIds,catalog,`requirements[${index}].evidenceIds`),state:'draft'} satisfies RequirementDetail;
+  });
+  return {...value,requirements,clarifications:[],...(Object.hasOwn(value,'deleteRequirementIds')?{deleteClarificationIds:[]}:{})};
 }
 
 export function evidencePromptInput(input: unknown) {
@@ -164,12 +125,17 @@ export function evidencePromptInput(input: unknown) {
   const candidateRefs=Array.isArray(result.candidateEvidenceRefs)?result.candidateEvidenceRefs as Array<{candidateId:string;refs:SourceRef[]}>:undefined;
   delete result.evidenceSourceRefs;
   delete result.candidateEvidenceRefs;
-  const catalog = buildEvidenceCatalog(units).filter(item=>!allowedRefs||allowedRefs.some(ref=>ref.sourceUnitId===item.sourceUnitId&&item.start>=(ref.start??0)&&item.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map((item,index)=>({...item,id:`E${index+1}`}));
+  const selectedRefs=[...(allowedRefs??[]),...(candidateRefs?.flatMap(item=>item.refs)??[]),...(Array.isArray(result.currentRequirements)?(result.currentRequirements as RequirementDetail[]).flatMap(item=>item.sourceRefs):[])];
+  const catalog = buildEvidenceCatalog(units).flatMap(item=>{
+    const boundaries=[item.start,item.end,...selectedRefs.filter(ref=>ref.sourceUnitId===item.sourceUnitId).flatMap(ref=>[ref.start,ref.end]).filter((position):position is number=>Number.isInteger(position)&&position!>item.start&&position!<item.end)];
+    const points=[...new Set(boundaries)].sort((a,b)=>a-b);
+    return points.slice(0,-1).map((start,index)=>({...item,start,end:points[index+1],text:item.text.slice(start-item.start,points[index+1]-item.start)}));
+  }).filter(item=>!allowedRefs||allowedRefs.some(ref=>ref.sourceUnitId===item.sourceUnitId&&item.start>=(ref.start??0)&&item.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map((item,index)=>({...item,id:`E${index+1}`}));
   if (catalog.length) {
-    if(Array.isArray(result.currentRequirements))result.currentRequirements=(result.currentRequirements as Array<RequirementDetail&{featureId?:string}>).map(requirement=>{
-      const ids=(refs:SourceRef[]|undefined)=>catalog.filter(evidence=>(refs??[]).some(ref=>ref.sourceUnitId===evidence.sourceUnitId&&evidence.start>=(ref.start??0)&&evidence.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map(evidence=>evidence.id);
-      return{id:requirement.id,title:requirement.title,behavior:{text:requirement.behavior,evidenceIds:ids(requirement.evidenceBindings?.behavior)},conditions:requirement.conditions.map((text,index)=>({text,evidenceIds:ids(requirement.evidenceBindings?.conditions[index])})),constraints:requirement.constraints.map((text,index)=>({text,evidenceIds:ids(requirement.evidenceBindings?.constraints[index])})),explicitAcceptanceEvidenceIds:ids(requirement.evidenceBindings?.explicitAcceptanceConditions.flat()),...(requirement.featureId?{featureId:requirement.featureId}:{})};
-    });
+    if(Array.isArray(result.currentRequirements))result.currentRequirements=(result.currentRequirements as RequirementDetail[]).map(requirement=>({
+      id:requirement.id,text:requirement.text,featureId:requirement.featureId,
+      evidenceIds:catalog.filter(evidence=>requirement.sourceRefs.some(ref=>ref.sourceUnitId===evidence.sourceUnitId&&evidence.start>=(ref.start??0)&&evidence.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map(evidence=>evidence.id),
+    }));
     result.sourceUnits = units.map(unit => ({id:unit.id,label:unit.label,kind:unit.kind,location:unit.location,...(unit.logicalPath?{logicalPath:unit.logicalPath}:{}),...(unit.sourceRole?{sourceRole:unit.sourceRole}:{}),...(unit.context?{context:unit.context}:{}),...(unit.asset?{asset:{mimeType:unit.asset.mimeType,readStatus:unit.asset.readStatus}}:{})}));
     result.evidenceCatalog = candidateRefs?catalog.map(evidence=>({...evidence,candidateIds:candidateRefs.filter(item=>item.refs.some(ref=>ref.sourceUnitId===evidence.sourceUnitId&&evidence.start>=(ref.start??0)&&evidence.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map(item=>item.candidateId)})):catalog;
   }

@@ -1,8 +1,8 @@
 import { DomainValidationError } from './node-validation.js';
 import type { AuditCategory, AuditIssue, Clarification, PrdProject, RequirementDetail, RequirementRule } from '../src/types.js';
-import { acceptDirectClarifications, acceptDirectDetails, validateDirectGraph } from './domain.js';
+import { acceptDirectDetails, validateDirectGraph } from './domain.js';
 
-export const auditCategories = new Set<AuditCategory>(['source-ambiguity','rule-extraction','feature-boundary','detail-mismatch','unclassified']);
+export const auditCategories = new Set<AuditCategory>(['rule-extraction','feature-boundary','detail-mismatch','unclassified']);
 
 /** 只合并内容和引用均相同的问题，避免把相似但不同的条件吞掉。 */
 export function classifyIssues(issues:AuditIssue[], project:PrdProject):AuditIssue[] {
@@ -17,20 +17,19 @@ export function classifyIssues(issues:AuditIssue[], project:PrdProject):AuditIss
     // Existing-rule errors must identify that rule. A true omission can have no rule ID yet.
     if(category==='rule-extraction'&&!issue.affectedIds.some(id=>rules.has(id))&&!/(遗漏|缺失|未提取)/.test(`${issue.type}${issue.detail}`))category=undefined;
     if(!category){
-      if(issue.type==='原文待澄清')category='source-ambiguity';
-      else if(issue.affectedIds.some(id=>features.has(id)))category='feature-boundary';
+      if(issue.affectedIds.some(id=>features.has(id)))category='feature-boundary';
       else if(issue.affectedIds.length>0&&issue.affectedIds.every(id=>details.has(id)))category='detail-mismatch';
       else if(issue.affectedIds.some(id=>rules.has(id)))category='rule-extraction';
       else category='unclassified';
     }
     const requirementIds=issue.affectedIds.filter(id=>details.has(id));
     const ownershipIssue=/(?:requirement[-_ ]?ownership|需求归属)/i.test(issue.type)||/主所属功能/.test(issue.detail);
-    let owner=issue.owner??(category==='source-ambiguity'?'source-decision':category==='feature-boundary'?'feature-grouping':category==='detail-mismatch'?'requirement-detail':'runtime-output');
+    let owner=issue.owner??(category==='feature-boundary'?'feature-grouping':category==='detail-mismatch'?'requirement-detail':'runtime-output');
     if(requirementIds.length){
       if(ownershipIssue){category='feature-boundary';owner='feature-grouping'}
       else if(category==='detail-mismatch'&&(owner!=='requirement-relation'||/(?:attribution|归属)/i.test(issue.type)))owner='requirement-detail';
     }
-    return[{...issue,category,owner,disposition:issue.disposition??(category==='source-ambiguity'?'needs-confirmation':'open')}];
+    return[{...issue,category,owner,disposition:issue.disposition??'open'}];
   });
 }
 
@@ -47,23 +46,19 @@ const distinct=(values:string[])=>[...new Set(values)];
 export function planDetailRepairs(issues:AuditIssue[],project:PrdProject):RepairScope[] {
   const scopes:RepairScope[]=[];
   const requirementById=new Map(project.requirements.map(item=>[item.id,item]));
-  const questionById=new Map(project.clarifications.map(item=>[item.id,item]));
-  for(const issue of issues.filter(item=>(item.owner==='requirement-detail'||(item.owner===undefined&&item.category==='detail-mismatch')||item.owner==='source-decision')&&item.disposition==='open'&&(item.owner!=='source-decision'||item.affectedIds.some(id=>questionById.has(id))))){
-    let requirements=issue.affectedIds.filter(id=>requirementById.has(id));
-    let questions=issue.affectedIds.filter(id=>questionById.has(id));
-    requirements=distinct([...requirements,...questions.flatMap(id=>questionById.get(id)!.affectedIds.filter(ref=>requirementById.has(ref)))]);
+  for(const issue of issues.filter(item=>(item.owner==='requirement-detail'||(item.owner===undefined&&item.category==='detail-mismatch'))&&item.disposition==='open')){
+    const requirements=issue.affectedIds.filter(id=>requirementById.has(id));
     let features=project.features.filter(feature=>issue.affectedIds.includes(feature.id)||requirements.some(id=>feature.requirementIds.includes(id)));
     if(!features.length){
-      const evidence=distinct([...issue.sourceUnitIds,...questions.flatMap(id=>questionById.get(id)!.affectedIds)]);
+      const evidence=distinct(issue.sourceUnitIds);
       const candidates=project.features.filter(feature=>feature.sourceUnitIds.some(id=>evidence.includes(id)));
       if(candidates.length!==1)continue;
       features=candidates;
     }
     // 功能 ID 只用于定位归属，不能授权改写整个功能；来源遗漏允许定点新增需求。
-    questions=distinct([...questions,...project.clarifications.filter(question=>question.affectedIds.some(id=>requirements.includes(id))).map(question=>question.id)]);
     const sourceIds=new Set(project.sourceUnits.map(unit=>unit.id));
-    const evidence=distinct([...issue.sourceUnitIds,...requirements.flatMap(id=>requirementById.get(id)!.sourceRefs.map(ref=>ref.sourceUnitId)),...questions.flatMap(id=>questionById.get(id)!.affectedIds.flatMap(ref=>requirementById.get(ref)?.sourceRefs.map(source=>source.sourceUnitId)??[ref]))]).filter(id=>sourceIds.has(id));
-    const scope:RepairScope={key:issue.id,issues:[issue],featureIds:features.map(feature=>feature.id),requirementIds:requirements,clarificationIds:questions,sourceUnitIds:evidence,requiredSourceUnitIds:distinct(issue.sourceUnitIds)};
+    const evidence=distinct([...issue.sourceUnitIds,...requirements.flatMap(id=>requirementById.get(id)!.sourceRefs.map(ref=>ref.sourceUnitId))]).filter(id=>sourceIds.has(id));
+    const scope:RepairScope={key:issue.id,issues:[issue],featureIds:features.map(feature=>feature.id),requirementIds:requirements,clarificationIds:[],sourceUnitIds:evidence,requiredSourceUnitIds:distinct(issue.sourceUnitIds)};
     let merged=true;
     while(merged){merged=false;for(let index=scopes.length-1;index>=0;index--){const other=scopes[index];const sharedWrite=other.requirementIds.some(id=>scope.requirementIds.includes(id))||other.clarificationIds.some(id=>scope.clarificationIds.includes(id));const sameSources=other.sourceUnitIds.length===scope.sourceUnitIds.length&&other.sourceUnitIds.every(id=>scope.sourceUnitIds.includes(id));const sameMissingTarget=!other.requirementIds.length&&!scope.requirementIds.length&&!other.clarificationIds.length&&!scope.clarificationIds.length&&sameSources&&other.featureIds.some(id=>scope.featureIds.includes(id));if(!sharedWrite&&!sameMissingTarget)continue;
       scope.issues.push(...other.issues);for(const field of ['featureIds','requirementIds','clarificationIds','sourceUnitIds','requiredSourceUnitIds'] as const)scope[field]=distinct([...scope[field],...other[field]]);scopes.splice(index,1);merged=true;
@@ -72,7 +67,6 @@ export function planDetailRepairs(issues:AuditIssue[],project:PrdProject):Repair
   }
   return scopes.map(scope=>({...scope,readOnlyRequirementIds:distinct([
     ...project.features.filter(feature=>scope.featureIds.includes(feature.id)).flatMap(feature=>feature.requirementIds),
-    ...scope.clarificationIds.flatMap(id=>questionById.get(id)!.affectedIds.filter(ref=>requirementById.has(ref))),
   ].filter(id=>!scope.requirementIds.includes(id)))}));
 }
 
@@ -83,7 +77,8 @@ function record(value:unknown):Record<string,unknown>{if(!value||typeof value!==
 export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:RepairScope):RequirementPatch {
   const raw=record(value);
   if(Object.keys(raw).some(key=>!['requirements','deleteRequirementIds','clarifications','deleteClarificationIds'].includes(key)))throw new DomainValidationError('增量包含未知字段');
-  if(!Array.isArray(raw.requirements)||!Array.isArray(raw.clarifications))throw new DomainValidationError('增量必须包含 requirements 和 clarifications 数组');
+  if(!Array.isArray(raw.requirements))throw new DomainValidationError('增量必须包含 requirements 数组');
+  if(!Array.isArray(raw.clarifications)||raw.clarifications.length||!Array.isArray(raw.deleteClarificationIds)||raw.deleteClarificationIds.length)throw new DomainValidationError('增量不允许生成或修改待处理事项');
   const sourceUnits=project.sourceUnits.filter(unit=>scope.sourceUnitIds.includes(unit.id));
   const rawRequirements=raw.requirements.map(value=>{const item=record(value),owners=project.features.filter(feature=>feature.requirementIds.includes(String(item.id)));return {...item,featureId:item.featureId??(owners.length===1?owners[0].id:scope.featureIds.length===1?scope.featureIds[0]:'')};});
   const accepted=acceptDirectDetails(rawRequirements,[],sourceUnits,true).requirements;
@@ -100,18 +95,7 @@ export function acceptRequirementPatch(value:unknown,project:PrdProject,scope:Re
     if(existing.has(item.id)&&(owners.length!==1||owners[0].id!==featureId))throw new DomainValidationError(`${item.id} 不允许通过明细修正更改主功能`);
     return {...item,featureId};
   });
-  const allowedRefs=new Set([...scope.sourceUnitIds,...scope.requirementIds,...requirements.map(item=>item.id)]);
-  const parsedClarifications=acceptDirectClarifications(raw.clarifications,sourceUnits,[...allowedRefs,...(scope.readOnlyRequirementIds??[])]);
-  const clarifications=parsedClarifications.map(item=>{
-    const id=item.id;checkId(id,scope.clarificationIds);
-    // 仅允许同一个既有问题保留原有只读引用，不扩大需求写集合或新增关联。
-    const previous=project.clarifications.find(question=>question.id===id);
-    const retainedRefs=new Set(previous?.affectedIds.filter(ref=>scope.readOnlyRequirementIds?.includes(ref))??[]);
-    const affectedIds=item.affectedIds;
-    if(!affectedIds.length||affectedIds.some(ref=>!allowedRefs.has(ref)&&!retainedRefs.has(ref)))throw new DomainValidationError(`${id} 引用越出修正范围`);
-    if(!existing.has(id)&&project.clarifications.some(other=>!scope.clarificationIds.includes(other.id)&&other.question===item.question&&other.reason===item.reason&&JSON.stringify([...other.affectedIds].sort())===JSON.stringify([...affectedIds].sort())))throw new DomainValidationError(`${id} 复制了范围外澄清`);
-    return{...item,affectedIds,...(previous?.userDecision?{userDecision:previous.userDecision}:{})};
-  });
+  const clarifications:Clarification[]=[];
   const deleteRequirementIds=stringList(raw.deleteRequirementIds,'deleteRequirementIds'),deleteClarificationIds=stringList(raw.deleteClarificationIds,'deleteClarificationIds');
   for(const id of deleteRequirementIds)if(!scope.requirementIds.includes(id))throw new DomainValidationError(`越界删除 ${id}`);
   for(const id of deleteClarificationIds)if(!scope.clarificationIds.includes(id))throw new DomainValidationError(`越界删除 ${id}`);
@@ -152,7 +136,7 @@ export function validateRepair(before:RequirementDetail[], candidate:Requirement
 
 }
 
-export const repairInstructions='仅修复 issues 指出的需求条目偏差，依据主 PRD，不增加业务假设。每项只有 id、featureId、text、evidenceIds，text是简短清单表述，保留必要限定；完整待处理事项和建议按原契约返回，不将建议写成正式需求。保留原ID与功能归属，不修改范围外内容。';
+export const repairInstructions='仅修复 issues 指出的需求条目偏差，依据主 PRD，不增加业务假设。每项只有 id、featureId、text、evidenceIds，text 是简短清单表述，保留原文明示的必要限定；仅输出 requirements 和 deleteRequirementIds，不生成问题、建议或澄清。保留原 ID 与功能归属，不修改范围外内容。';
 
 export function nextRuleId(rules:RequirementRule[]){return Math.max(0,...rules.map(rule=>Number(rule.id.match(/RL-(\d+)/)?.[1]??0)))+1}
 

@@ -42,8 +42,8 @@ export function invalidateSourceCoverageDecisions(project:PrdProject,issues:Audi
 export function requiredChecks(project:PrdProject,resultVersion:number):Record<RequiredCheckId,AnalysisCheckRecord>{
   const now=Date.now(),base={resultVersion,checkedAt:now,issueIds:[] as string[]};
   const dependencyHash=contentFingerprint(project);
-  return {source:{id:'source',status:project.sourceUnits.every(x=>x.status==='processed')?'passed':'failed',dependencyHash,...base},feature:{id:'feature',status:'unknown',dependencyHash,...base},detail:{id:'detail',status:'unknown',dependencyHash,...base},relation:{id:'relation',status:'unknown',dependencyHash,...base},clarification:{id:'clarification',status:'unknown',dependencyHash,...base}};
+  return {source:{id:'source',status:project.sourceUnits.every(x=>x.status==='processed')?'passed':'failed',dependencyHash,...base},feature:{id:'feature',status:'unknown',dependencyHash,...base},detail:{id:'detail',status:'unknown',dependencyHash,...base},relation:{id:'relation',status:'unknown',dependencyHash,...base}};
 }
 export function checksPass(checks:Partial<Record<RequiredCheckId,AnalysisCheckRecord>>|undefined,resultVersion:number){
-  return (['source','feature','detail','relation','clarification'] as RequiredCheckId[]).every(id=>checks?.[id]?.status==='passed'&&checks[id]?.resultVersion===resultVersion);
+  return (['source','feature','detail','relation'] as RequiredCheckId[]).every(id=>checks?.[id]?.status==='passed'&&checks[id]?.resultVersion===resultVersion);
 }

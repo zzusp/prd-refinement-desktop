@@ -15,7 +15,7 @@ describe('领域候选验收',()=>{
     expect(batch.map(item=>item.id)).toEqual(['a','b']);
   });
   it('旧规格书字段不能混入正式需求',()=>{expect(()=>acceptDetails([{...requirements[0],behavior:'扩写'}],[],rules,sources)).toThrow('旧规格书')});
-  it('模型不得自动标记问题已解决',()=>{expect(()=>acceptDetails(requirements,[{id:'q',question:'?',reason:'?',affectedIds:['R-0001'],state:'resolved'}],rules,sources)).toThrow('不得自动解决')});
+  it('模型不得生成待处理事项',()=>{expect(()=>acceptDetails(requirements,[{id:'q',question:'?',reason:'?',affectedIds:['R-0001'],state:'resolved'}],rules,sources)).toThrow('不允许生成')});
   it('拒绝不存在的来源引用',()=>expect(()=>acceptRules([{...rules[0],id:'LOCAL',sourceUnitIds:['S-404']}],sources)).toThrow('不存在的 ID'));
   it('接受简短需求且保留原文引用',()=>expect(acceptDetails(requirements,[],rules,sources).requirements).toEqual(requirements));
   it('拒绝悬空问题引用',()=>expect(()=>validateGraph(sources,rules,features,requirements,[{id:'Q-001',question:'?',reason:'?',affectedIds:['TEMP-404'],state:'open'}])).toThrow('不存在的 ID'));

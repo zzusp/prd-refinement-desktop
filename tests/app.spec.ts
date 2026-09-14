@@ -72,7 +72,7 @@ describe('需求细化数据契约', () => {
     const task={id:'T-1',resultVersion:3,status:'completed',progress:100,steps:[],adjustment:{feedback:'统一含税',results:[{operationId:'OP-1',status:'applied',featureIds:['F-1'],clarificationIds:[],detail:'退款金额已统一为含税口径。'},{operationId:'OP-2',status:'needs-confirmation',featureIds:[],clarificationIds:[],detail:'仍需确认支付超时范围。'}]},project:{name:'订单',features:[],requirements:[],clarifications:[],sourceUnits:[]}} as unknown as AnalysisTask;
     const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
     expect(html).toContain('描述你希望怎么调整');
-    expect(html).toContain('可以一次写多条意见');
+    expect(html).toContain('可以调整模块组织、需求颗粒度或指出遗漏');
     expect(html).toContain('按说明调整');
     expect(html).toContain('已落实 1 项，1 项仍需处理');
     expect(html).toContain('退款金额已统一为含税口径。');
@@ -83,31 +83,26 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('处理方式');
   });
 
-  it('待处理事项首屏直接显示问题、已知事实和影响',()=>{
-    const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款金额是否含税？',reason:'原文未明确',level:'blocking',knownFacts:'退款金额来自原订单。',unresolvedPoint:'税额口径未确定。',impact:'会影响退款金额计算。',levelReason:'阻塞金额实现。',resolutionProposal:{recommendation:'退款金额按原订单含税实付金额计算。',rationale:'退款基数来自原订单，沿用实付口径可保持账务一致。',impact:'退款金额包含原订单税额。',confirmation:'确认退款采用含税实付口径。',alternatives:[],sourceRefs:[]},affectedIds:[],state:'open'}]} as any;
-    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project,selectedProposalIds:[],onProposalSelection:()=>undefined,onProposalOverride:()=>undefined}));
-    expect(html).toContain('退款金额是否含税？');
-    expect(html).toContain('退款金额来自原订单。');
-    expect(html).toContain('会影响退款金额计算。');
-    expect(html).toContain('查看依据');
-    expect(html).toContain('退款金额按原订单含税实付金额计算。');
-    expect(html).toContain('建议不是 PRD 事实');
-    expect(html).toContain('选择当前列表的建议方案');
-    expect(html).toContain('修改');
-    expect(html).not.toContain('填写答案');
-    expect(html).not.toContain('处理方式');
+  it('历史业务待处理事项和建议不进入当前页面',()=>{
+    const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款金额是否含税？',state:'open',resolutionProposal:{recommendation:'采用含税金额'}}]} as any;
+    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project}));
+    expect(html).toBe('');
+    const task={id:'T-1',resultVersion:2,status:'completed',project} as AnalysisTask;
+    const feedback=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
+    expect(feedback).not.toContain('采纳');
+    expect(feedback).not.toContain('退款金额是否含税');
+    expect(feedback).toContain('清单中的功能和需求必须存在于 PRD');
   });
 
-  it('旧结果可只补充缺少的建议方案',()=>{
-    const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款金额是否含税？',reason:'原文未明确',level:'blocking',knownFacts:'退款金额来自原订单。',unresolvedPoint:'税额口径未确定。',impact:'会影响退款金额计算。',levelReason:'阻塞金额实现。',affectedIds:[],state:'open'}]} as any;
-    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project,onGenerateProposals:()=>undefined}));
-    expect(html).toContain('1 项阻塞事项还没有建议方案');expect(html).toContain('无需重跑完整细化');expect(html).toContain('生成建议方案');
-  });
-
-  it('任务级入口一次提交已选择的建议方案且允许补充例外',()=>{
-    const task={id:'T-1',resultVersion:2,status:'completed',project:{features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款金额是否含税？',state:'open',resolutionProposal:{recommendation:'退款金额按原订单含税实付金额计算。'}}]}} as unknown as AnalysisTask;
-    const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined,selectedProposalIds:['Q-1'],proposalOverrides:{'Q-1':'退款金额按不含税金额计算。'},onProposalSelection:()=>undefined}));
-    expect(html).toContain('本次将采纳 1 项建议方案，其中 1 项已修改');expect(html).toContain('你输入的说明优先');expect(html).toContain('按所选方案调整（1）');
+  it('平台校验失败保留在执行记录，不变成业务建议',()=>{
+    const project={features:[],requirements:[],sourceUnits:[],audit:{issues:[{id:'A-1',owner:'runtime-output',detail:'当前节点输出缺少有效原文引用。',sourceUnitIds:[],affectedIds:[],disposition:'open'}]}} as any;
+    const html=renderToStaticMarkup(React.createElement(ResultIssues,{project}));
+    expect(html).toContain('平台检查记录');
+    expect(html).toContain('分析结果未能通过校验');
+    expect(html).toContain('当前节点输出缺少有效原文引用');
+    expect(html).toContain('未通过');
+    expect(html).not.toContain('建议方案');
+    expect(html).not.toContain('待处理事项');
   });
 
   it('草稿存储不可用时不阻断页面',()=>{
@@ -130,7 +125,7 @@ describe('需求细化数据契约', () => {
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
     expect(html).toContain('全部需求');
-    expect(html).toContain('待处理事项');
+    expect(html).not.toContain('待处理事项');
     expect(html).toContain('执行记录');
     expect(html).toContain('生成交付包');
     expect(html).toContain('打开产物');
@@ -164,9 +159,4 @@ it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{
  expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');
  const list=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T',status:'completed'} as any,p,onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
  expect(list).toContain('订单');expect(list).toContain('允许查询订单。');expect(list).toContain('原文');
-});
-it('已确认的新规则继续显示待同步 PRD，不再作为未采纳建议勾选',()=>{
- const project={features:[],requirements:[],sourceUnits:[],clarifications:[{id:'Q-1',question:'退款口径？',reason:'原文未定',affectedIds:[],state:'open',userDecision:{text:'使用不含税金额',confirmedAt:'2026-09-14',status:'pending-prd-sync',operationId:'OP-1'},resolutionProposal:{recommendation:'使用含税金额',rationale:'便于对账',impact:'改变金额',confirmation:'确认口径',alternatives:[],sourceRefs:[]}}]} as any;
- const html=renderToStaticMarkup(React.createElement(ResultIssues,{project,onProposalSelection:()=>undefined,onProposalOverride:()=>undefined}));
- expect(html).toContain('已确认，待同步 PRD');expect(html).toContain('使用不含税金额');expect(html).toContain('使用含税金额');expect(html).not.toContain('选择建议方案：');expect(html).not.toContain('>修改</button>');
 });

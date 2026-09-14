@@ -55,7 +55,7 @@ export interface RepairAttemptRecord {
   candidateFingerprint?:string;
   commitVersion?:number;
 }
-export type RequiredCheckId='source'|'feature'|'detail'|'relation'|'clarification';
+export type RequiredCheckId='source'|'feature'|'detail'|'relation';
 export interface AnalysisCheckRecord { id:RequiredCheckId; resultVersion:number; dependencyHash:string; status:'passed'|'failed'|'unknown'|'stale'; checkedAt:number; issueIds:string[] }
 export interface GraphRepairRecord {
   scope:'rules'|'features';
@@ -244,7 +244,6 @@ export interface FeedbackOperation {
   kind: FeedbackOperationKind;
   instruction: string;
   featureIds: string[];
-  clarificationIds: string[];
   atomicGroupId?: string;
 }
 export interface FeedbackPendingItem {
@@ -256,7 +255,6 @@ export interface FeedbackPendingItem {
 }
 export interface FeedbackAdjustmentPlan {
   operations: FeedbackOperation[];
-  pending: FeedbackPendingItem[];
 }
 export interface FeedbackOperationResult {
   operationId: string;
@@ -392,7 +390,7 @@ export interface AnalysisTask {
   runtimeConfig?: RuntimeConfigSnapshot;
   attempt: number;
   checkpoint?: {
-    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26;
+    pipelineVersion?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27;
     nodeReceipts?: Record<string,NodeExecutionReceipt>;
     clarificationResults?: { dependencyHash: string; results: Record<string, { status: 'candidate' | 'verified' | 'rejected'; value?: unknown; attempts: number; feedback?: string }> };
     resultVersion?:number;
@@ -481,7 +479,6 @@ declare global {
       retryAnalysis(taskId: string): Promise<void>;
       restartAnalysis(taskId: string): Promise<AnalysisTask>;
       adjustAnalysis(request: RefinementAdjustmentRequest): Promise<AnalysisTask>;
-      generateResolutionProposals(taskId: string): Promise<AnalysisTask>;
       onAnalysisTaskUpdate(callback: (task: AnalysisTask) => void): () => void;
     };
   }

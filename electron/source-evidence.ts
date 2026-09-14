@@ -76,7 +76,6 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
     if (!current || typeof current !== 'object') return current;
     const item = { ...(current as Record<string, unknown>) };
     // 生成候选的初始状态属于平台，不要求模型提交内部生命周期字段。
-    if(typeof item.question==='string'&&typeof item.level==='string'&&Object.prototype.hasOwnProperty.call(item,'evidenceIds'))item.state='open';
     if(Array.isArray(item.features))item.features=item.features.map(raw=>raw&&typeof raw==='object'?{...raw,state:'draft'}:raw);
     if (catalog.length && Array.isArray(item.sourceRefs) && item.sourceRefs.some(raw => raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'quote'))) throw new DomainValidationError(`${path}.sourceRefs 不得包含模型抄写的 quote，请选择 evidenceIds`);
     if (Object.prototype.hasOwnProperty.call(item, 'evidenceIds')) {
@@ -102,8 +101,9 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
   return visit(value, 'response') as Record<string, unknown>;
 }
 
-/** 正式条目只物化短文本和条目级原文引用；完整问题与建议仍使用原协议。 */
+/** 只物化短文本和条目级原文引用，空澄清数组属于内部存储结构。 */
 export function materializeDetailEvidenceSelections(value:Record<string,unknown>,catalog:SourceEvidence[],featureId?:string):Record<string,unknown> {
+  if(Object.keys(value).some(key=>!['requirements','deleteRequirementIds'].includes(key)))throw new DomainValidationError('需求细化只允许 requirements 和修正删除编号，不允许问题、建议或澄清字段');
   if(!Array.isArray(value.requirements))throw new DomainValidationError('requirements 必须为数组');
   const requirements=value.requirements.map((raw,index)=>{
     if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new DomainValidationError('需求项必须为对象');
@@ -114,7 +114,7 @@ export function materializeDetailEvidenceSelections(value:Record<string,unknown>
     if(featureId&&item.featureId!==undefined&&item.featureId!==featureId)throw new DomainValidationError('需求所属功能越界');
     return {id,text,featureId:owner,sourceRefs:resolveEvidenceIds(item.evidenceIds,catalog,`requirements[${index}].evidenceIds`),state:'draft'} satisfies RequirementDetail;
   });
-  return materializeEvidenceSelections({...value,requirements},catalog);
+  return {...value,requirements,clarifications:[],...(Object.hasOwn(value,'deleteRequirementIds')?{deleteClarificationIds:[]}:{})};
 }
 
 export function evidencePromptInput(input: unknown) {

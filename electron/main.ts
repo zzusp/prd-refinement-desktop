@@ -187,7 +187,6 @@ if (ownsInstance) app.whenReady().then(async () => {
   ipcMain.handle('analysis:adjust', async (_event, request: RefinementAdjustmentRequest) => {
     return scheduler.enqueueAdjustment({...request,operationId:request.operationId?.trim()||randomUUID()});
   });
-  ipcMain.handle('analysis:generate-resolution-proposals', async (_event, taskId:string) => scheduler.generateResolutionProposals(taskId));
   ipcMain.handle('analysis:artifacts', (_event, taskId:string) => scheduler.queryArtifacts(taskId));
   ipcMain.handle('analysis:open-result', async (_event, taskId: string) => { const task=scheduler.get(taskId);if(!task)return{exists:false,error:'任务不存在'};const artifacts=await scheduler.queryArtifacts(taskId),artifact=artifacts.find(item=>item.resultVersion===task.resultVersion&&item.exists);if(!artifact)return{exists:false,error:artifacts.length?'产物目录已被移动或删除，请重新生成':'当前版本尚未生成产物'};const error=await shell.openPath(artifact.path);return error?{exists:true,path:artifact.path,artifactId:artifact.id,error:`目录打开失败：${error}`}:{exists:true,path:artifact.path,artifactId:artifact.id}; });
   ipcMain.handle('analysis:export-package', async (_event, taskId:string) => {

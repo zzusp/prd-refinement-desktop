@@ -24,7 +24,7 @@ try{
   const created=retryTaskId
     ? await window.evaluate(async id=>{await window.prdApp.retryAnalysis(id);return (await window.prdApp.loadAnalysisTasks()).find(item=>item.id===id)},retryTaskId)
     : await window.evaluate(id=>window.prdApp.restartAnalysis(id),source.id);
-  assert(created);assert.equal(created.checkpoint.pipelineVersion,26);assert.equal(created.project.sourceHash,source.project.sourceHash);
+  assert(created);assert.equal(created.checkpoint.pipelineVersion,27);assert.equal(created.project.sourceHash,source.project.sourceHash);
   Object.assign(summary,{identity,taskId:created.id,pipelineVersion:created.checkpoint.pipelineVersion});
   let previous='';
   while(true){
@@ -34,6 +34,7 @@ try{
     if(['completed','needs-attention','failed'].includes(task.status)){
       const persisted=JSON.parse(await readFile(path.join(taskRoot,`${task.id}.json`),'utf8'));
       assert.equal(persisted.status,task.status);assert.equal(sha(await readFile(sourcePath)),sha(bytes));
+      assert.equal(task.project.clarifications.length,0,'Pipeline 27 不得生成待处理事项或澄清');
       Object.assign(summary,{status:task.status,error:task.error,features:task.project.features.length,requirements:task.project.requirements.length,clarifications:task.project.clarifications.length,delivery:task.project.delivery,artifacts:task.artifacts,completedAt:new Date().toISOString(),sourceUnchanged:true});
       await window.screenshot({path:path.join(output,'terminal.png'),fullPage:true});
       await writeFile(path.join(output,'summary.json'),JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));

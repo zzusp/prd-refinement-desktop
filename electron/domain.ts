@@ -41,32 +41,10 @@ const sourceRefs = (item:Record<string,unknown>, units:SourceUnit[], path:string
   });
   return strings(item.sourceUnitIds,`${path}.sourceUnitIds`,false).map(sourceUnitId=>({sourceUnitId}));
 };
-const clarificationLevels = new Set(['blocking','suggestion','ignorable']);
-const clarificationFrom = (item:Record<string,unknown>,index:number,units:SourceUnit[],knownAffected:Set<string>):Clarification => {
-  const path=`clarifications[${index}]`,state=text(item.state,`${path}.state`);if(state!=='open')throw new DomainValidationError(`${path} 模型不得自动解决待确认事项`);
-  const level=text(item.level,`${path}.level`);if(!clarificationLevels.has(level))throw new DomainValidationError(`${path}.level 仅允许 blocking、suggestion 或 ignorable`);
-  const affectedIds=strings(item.affectedIds,`${path}.affectedIds`,false);refs(affectedIds,knownAffected,`${path}.affectedIds`);
-  const question=text(item.question,`${path}.question`),reason=text(item.reason,`${path}.reason`),knownFacts=text(item.knownFacts,`${path}.knownFacts`),unresolvedPoint=text(item.unresolvedPoint,`${path}.unresolvedPoint`),impact=text(item.impact,`${path}.impact`),levelReason=text(item.levelReason,`${path}.levelReason`);
-  if(question.length<8||/^(NULL|统一处理[。.]?|请人工确认该原文应如何整理为需求明细[。.]?)$/i.test(question))throw new DomainValidationError(`${path}.question 必须是用户可直接理解和回答的完整业务问题`);
-  const selected=sourceRefs(item,units,path);if(!selected.length)throw new DomainValidationError(`${path}.sourceRefs 不得为空`);
-  const defaultResolution=item.defaultResolution===undefined?undefined:text(item.defaultResolution,`${path}.defaultResolution`);
-  if(level==='suggestion'&&!defaultResolution)throw new DomainValidationError(`${path}.defaultResolution 必须说明暂不处理时沿用的明确口径`);
-  let resolutionProposal:Clarification['resolutionProposal'];
-  if(level==='blocking'){
-    if(!item.resolutionProposal||typeof item.resolutionProposal!=='object'||Array.isArray(item.resolutionProposal))throw new DomainValidationError(`${path}.resolutionProposal 必须为阻塞事项给出可执行建议`);
-    const proposal=item.resolutionProposal as Record<string,unknown>,proposalIds=Array.isArray(proposal.evidenceIds)?strings(proposal.evidenceIds,`${path}.resolutionProposal.evidenceIds`,false):Array.isArray(proposal.sourceRefs)?(proposal.sourceRefs as Array<Record<string,unknown>>).map((ref,index)=>text(ref.sourceUnitId,`${path}.resolutionProposal.sourceRefs[${index}].sourceUnitId`)):[],knownSources=new Set(selected.map(ref=>ref.sourceUnitId));
-    if(!proposalIds.length)throw new DomainValidationError(`${path}.resolutionProposal.evidenceIds 不得为空`);
-    refs(proposalIds,knownSources,`${path}.resolutionProposal.evidenceIds`);
-    const recommendation=text(proposal.recommendation,`${path}.resolutionProposal.recommendation`),confirmation=text(proposal.confirmation,`${path}.resolutionProposal.confirmation`);
-    if(recommendation.length<12||/请.{0,6}(确认|决定|补充)[。.]?$/.test(recommendation))throw new DomainValidationError(`${path}.resolutionProposal.recommendation 必须给出具体口径，不能只要求用户确认`);
-    resolutionProposal={recommendation,rationale:text(proposal.rationale,`${path}.resolutionProposal.rationale`),impact:text(proposal.impact,`${path}.resolutionProposal.impact`),confirmation,alternatives:strings(proposal.alternatives??[],`${path}.resolutionProposal.alternatives`).slice(0,2),sourceRefs:proposalIds.map(sourceUnitId=>({sourceUnitId}))};
-  }
-  return{id:text(item.id,`${path}.id`),question,reason,level:level as Clarification['level'],knownFacts,unresolvedPoint,impact,levelReason,...(defaultResolution?{defaultResolution}:{}),...(resolutionProposal?{resolutionProposal}:{}),sourceRefs:selected,affectedIds,state:'open'};
-};
-export function acceptDirectClarifications(value:unknown,sourceUnits:SourceUnit[],knownAffectedIds:string[]){
-  if(!Array.isArray(value))throw new DomainValidationError('clarifications 必须是数组');
-  const clarifications=value.map((raw,index)=>clarificationFrom(raw as Record<string,unknown>,index,sourceUnits,new Set(knownAffectedIds)));
-  uniqueIds(clarifications,'clarifications');return clarifications;
+/** 历史读取保留接口，但新链路禁止生成待处理事项。 */
+export function acceptDirectClarifications(value:unknown,_sourceUnits:SourceUnit[],_knownAffectedIds:string[]):Clarification[]{
+  if(!Array.isArray(value)||value.length)throw new DomainValidationError('只输出功能模块和需求清单，不允许生成澄清');
+  return [];
 }
 const featureFrom = (item:Record<string,unknown>, index:number, units:SourceUnit[]):Feature => {
   const state=text(item.state,`features[${index}].state`);if(!reviewStates.has(state))throw new DomainValidationError(`features[${index}].state 非法`);
@@ -113,8 +91,8 @@ export function validateGraph(units:SourceUnit[],rules:RequirementRule[],feature
 export function acceptAuditIssues(value:unknown,sourceUnits:SourceUnit[],rules:RequirementRule[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[],relations:RequirementRelation[]=[]){
   if(!Array.isArray(value))throw new DomainValidationError('issues 必须是数组');
   const sourceIds=new Set(sourceUnits.map(item=>item.id)),affectedIds=new Set([...sourceUnits,...rules,...features,...requirements,...clarifications,...relations].map(item=>item.id));
-  const owners=new Set(['feature-grouping','requirement-detail','requirement-relation','source-decision','runtime-output']);
-  const issues=value.map((raw,index)=>{const item=raw as Record<string,unknown>,direction=text(item.direction,`issues[${index}].direction`);if(!['forward','reverse','cross'].includes(direction))throw new DomainValidationError(`issues[${index}].direction 非法`);const sourceUnitIds=strings(item.sourceUnitIds,`issues[${index}].sourceUnitIds`,false),affected=strings(item.affectedIds,`issues[${index}].affectedIds`,false);refs(sourceUnitIds,sourceIds,`issues[${index}].sourceUnitIds`);refs(affected,affectedIds,`issues[${index}].affectedIds`);if(item.category!==undefined&&!auditCategories.has(item.category as never))throw new DomainValidationError('审计问题分类非法');if(item.owner!==undefined&&!owners.has(item.owner as string))throw new DomainValidationError('审计问题责任非法');const category=item.category as import('../src/types.js').AuditCategory|undefined;const clarificationDraft=category==='source-ambiguity'?clarificationFrom(item.clarification as Record<string,unknown>,index,sourceUnits,affectedIds):undefined;return{category,owner:item.owner as import('../src/types.js').AuditOwner|undefined,id:text(item.id,`issues[${index}].id`),direction,type:text(item.type,`issues[${index}].type`),sourceUnitIds,affectedIds:affected,detail:text(item.detail,`issues[${index}].detail`),...(clarificationDraft?{clarificationDraft}: {})}});uniqueIds(issues,'issues');return issues;
+  const owners=new Set(['feature-grouping','requirement-detail','requirement-relation','runtime-output']);
+  const issues=value.map((raw,index)=>{const item=raw as Record<string,unknown>,direction=text(item.direction,`issues[${index}].direction`);if(Object.keys(item).some(key=>!['id','direction','type','sourceUnitIds','affectedIds','detail','owner','category'].includes(key)))throw new DomainValidationError('审计只允许平台清单偏差字段');if(!['forward','reverse','cross'].includes(direction))throw new DomainValidationError(`issues[${index}].direction 非法`);const sourceUnitIds=strings(item.sourceUnitIds,`issues[${index}].sourceUnitIds`,false),affected=strings(item.affectedIds,`issues[${index}].affectedIds`,false);refs(sourceUnitIds,sourceIds,`issues[${index}].sourceUnitIds`);refs(affected,affectedIds,`issues[${index}].affectedIds`);if(item.category!==undefined&&!auditCategories.has(item.category as never))throw new DomainValidationError('审计问题分类非法');if(item.owner!==undefined&&!owners.has(item.owner as string))throw new DomainValidationError('审计问题责任非法');const category=item.category as import('../src/types.js').AuditCategory|undefined;return{category,owner:item.owner as import('../src/types.js').AuditOwner|undefined,id:text(item.id,`issues[${index}].id`),direction,type:text(item.type,`issues[${index}].type`),sourceUnitIds,affectedIds:affected,detail:text(item.detail,`issues[${index}].detail`)}});uniqueIds(issues,'issues');return issues;
 }
 
 const dispositionKinds=new Set(['requirement','clarification','context','example','summary','out-of-scope']);
@@ -135,6 +113,7 @@ function acceptConstraintTargets(features:Feature[],rawFeatures:unknown[]){
 
 export function acceptDirectFeatureBatch(featuresValue:unknown,dispositionsValue:unknown,sourceUnits:SourceUnit[]){
   if(!Array.isArray(featuresValue)||!Array.isArray(dispositionsValue))throw new DomainValidationError('功能识别必须同时返回 features 与 sourceDispositions 数组');
+  if(dispositionsValue.some(raw=>raw&&typeof raw==='object'&&(raw as Record<string,unknown>).contentRole==='clarification'))throw new DomainValidationError('新分析不允许将原文分类为待澄清事项');
   const sourceIds=new Set(sourceUnits.map(unit=>unit.id)),sourceById=new Map(sourceUnits.map(unit=>[unit.id,unit]));
   const features=featuresValue.map((raw,index)=>{const feature=featureFrom(raw as Record<string,unknown>,index,sourceUnits);refs(feature.sourceUnitIds,sourceIds,`features[${index}].sourceUnitIds`);return feature});
   uniqueIds(features,'features');acceptConstraintTargets(features,featuresValue);const featureIds=new Set(features.map(feature=>feature.id));
@@ -216,8 +195,8 @@ export function acceptFeatureUnification(value:unknown,candidates:Feature[],sour
 }
 
 export function acceptDirectDetails(requirementsValue:unknown,questionsValue:unknown,units:SourceUnit[],_requireEvidenceBindings=false){
-  if(!Array.isArray(requirementsValue)||!Array.isArray(questionsValue))throw new DomainValidationError('需求细化必须同时返回 requirements 与 clarifications 数组');
-  const sourceIds=new Set(units.map(unit=>unit.id));
+  if(!Array.isArray(requirementsValue))throw new DomainValidationError('需求细化必须返回 requirements 数组');
+  if(!Array.isArray(questionsValue)||questionsValue.length)throw new DomainValidationError('需求细化不允许生成待处理事项或澄清');
   const requirements=requirementsValue.map((raw,index)=>{
     if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new DomainValidationError('需求项必须为对象');
     const item=raw as Record<string,unknown>,allowed=new Set(['id','featureId','text','sourceRefs','state','deliveryScope']);
@@ -229,9 +208,7 @@ export function acceptDirectDetails(requirementsValue:unknown,questionsValue:unk
     for(const ref of selected){const unit=units.find(unit=>unit.id===ref.sourceUnitId)!;if(!unit||unit.synthetic||unit.id.startsWith('USER-')||unit.sourceRole&&unit.sourceRole!=='primary')throw new DomainValidationError(`${id} 正式需求只能来自主 PRD，不得来自用户决定或补充资料`);}
     return {id,featureId:text(item.featureId,`${id}.featureId`),text:text(item.text,`${id}.text`),sourceRefs:selected,state:state as RequirementDetail['state'],...(item.deliveryScope?{deliveryScope:item.deliveryScope as RequirementDetail['deliveryScope']}:{})};
   });uniqueIds(requirements,'requirements');
-  const known=new Set([...sourceIds,...requirements.map(item=>item.id)]);
-  const clarifications=questionsValue.map((raw,index)=>clarificationFrom(raw as Record<string,unknown>,index,units,known));uniqueIds(clarifications,'clarifications');
-  return {requirements,clarifications};
+  return {requirements,clarifications:[] as Clarification[]};
 }
 
 export function validateDirectGraph(sourceUnits:SourceUnit[],dispositions:SourceDisposition[],features:Feature[],requirements:RequirementDetail[],clarifications:Clarification[]){

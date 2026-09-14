@@ -1,34 +1,4 @@
-import type { AuditIssue, Clarification, Feature, PrdProject, RequirementDetail, SourceRef, SourceUnit } from './types.js';
-
-export type ClarificationLevel = NonNullable<Clarification['level']>;
-
-export const clarificationLevel = (item: Clarification): ClarificationLevel => item.level ?? 'blocking';
-
-export const clarificationLevelLabel: Record<ClarificationLevel, string> = {
-  blocking: '阻塞',
-  suggestion: '建议',
-  ignorable: '可忽略',
-};
-
-export function activeClarifications(project: PrdProject) {
-  return project.clarifications.filter(item => item.state === 'open');
-}
-
-export function activePlatformIssues(project: PrdProject) {
-  return (project.audit?.issues ?? []).filter(item =>
-    item.disposition !== 'repaired' && item.disposition !== 'dismissed' && item.disposition !== 'needs-confirmation'
-  );
-}
-
-export function clarificationCounts(project: PrdProject) {
-  const active = activeClarifications(project);
-  return {
-    blocking: active.filter(item => clarificationLevel(item) === 'blocking').length,
-    suggestion: active.filter(item => clarificationLevel(item) === 'suggestion').length,
-    ignorable: active.filter(item => clarificationLevel(item) === 'ignorable').length,
-    platform: activePlatformIssues(project).length,
-  };
-}
+import type { AuditIssue, Feature, PrdProject, RequirementDetail, SourceRef, SourceUnit } from './types.js';
 
 const internalSourcePattern = /\[S-[^\]]+\]\s*/g;
 

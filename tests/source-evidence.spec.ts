@@ -22,12 +22,14 @@ describe('确定性原文证据目录',()=>{
     expect(()=>resolveEvidenceIds(['E-unknown'],catalog,'feature.evidenceIds')).toThrow('未提供或过期');
     expect(()=>resolveEvidenceIds([],catalog,'feature.evidenceIds')).toThrow('非空证据编号数组');
   });
-  it('功能、澄清和关系仍由证据编号物化来源',()=>{
+  it('功能和关系由证据编号物化来源',()=>{
     const catalog=buildEvidenceCatalog(units),id=catalog[0].id;
     expect(materializeEvidenceSelections({features:[{evidenceIds:[id]}],relation:{evidenceIds:[id]}},catalog)).toMatchObject({features:[{sourceRefs:[{sourceUnitId:'S1',start:0,end:5}]}],relation:{sourceRefs:[{sourceUnitId:'S1',start:0,end:5}]}});
   });
   it('简短需求通过固定目录物化归属和状态',()=>{
-    const catalog=buildEvidenceCatalog(units),raw={requirements:[{id:'LOCAL-R1',text:'允许撤回',evidenceIds:[catalog[0].id]}],clarifications:[]};
+    const catalog=buildEvidenceCatalog(units),raw={requirements:[{id:'LOCAL-R1',text:'允许撤回',evidenceIds:[catalog[0].id]}]};
+    expect(materializeDetailEvidenceSelections(raw,catalog,'F1').clarifications).toEqual([]);
+    expect(()=>materializeDetailEvidenceSelections({...raw,clarifications:[]},catalog,'F1')).toThrow('不允许');
     expect(materializeDetailEvidenceSelections(raw,catalog,'F1').requirements).toEqual([{id:'LOCAL-R1',featureId:'F1',text:'允许撤回',sourceRefs:[{sourceUnitId:'S1',start:0,end:5}],state:'draft'}]);
     for(const field of ['state','sourceUnitIds','behavior','evidenceBindings'])expect(()=>materializeDetailEvidenceSelections({...raw,requirements:[{...raw.requirements[0],[field]:[]}]},catalog,'F1')).toThrow();
     expect(()=>materializeDetailEvidenceSelections(raw,catalog)).toThrow();

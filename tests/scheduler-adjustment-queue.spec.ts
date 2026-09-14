@@ -88,6 +88,7 @@ const task = (
   createdAt,
   completedAt: createdAt,
   steps: [],
+  checkpoint: {pipelineVersion:27,resultVersion:1,promptMetrics:[],detailedFeatureIds:[],auditIssues:[],validationFailures:[]},
 });
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -155,10 +156,9 @@ describe("调整任务队列和版本基准", () => {
       }),
     ).rejects.toThrow("最新版");
   });
-  it("允许修改建议后按最终文本提交并持久化结构化采纳记录",async()=>{
+  it("拒绝旧版建议采纳进入仅清单调整流程",async()=>{
     const directory=await root(),base=task('T-BASE',1);base.project.clarifications=[{id:'Q-1',question:'超时多久？',reason:'原文未明确',level:'blocking',knownFacts:'存在超时',unresolvedPoint:'时长',impact:'无法实现',levelReason:'影响业务行为',sourceRefs:[{sourceUnitId:'S1'}],affectedIds:['R1'],state:'open',resolutionProposal:{recommendation:'超时时长设为 30 分钟。',rationale:'沿用当前处理周期。',impact:'等待时间较长。',confirmation:'确认超时时长。',alternatives:[],sourceRefs:[{sourceUnitId:'S1'}]}}];await save(directory,base);
     const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>{throw new Error('测试不启动模型')});await scheduler.initialize();
-    const created=await scheduler.enqueueAdjustment({operationId:'OP-EDIT',baseTaskId:'T-BASE',baseVersion:1,feedback:'超时时长改为 15 分钟。',acceptedProposals:[{clarificationId:'Q-1',baseRecommendation:'超时时长设为 30 分钟。',finalText:'超时时长改为 15 分钟。'}]});
-    expect(created.adjustment?.acceptedProposals?.[0].finalText).toBe('超时时长改为 15 分钟。');await scheduler.cancel(created.id);
+    await expect(scheduler.enqueueAdjustment({operationId:'OP-EDIT',baseTaskId:'T-BASE',baseVersion:1,feedback:'超时时长改为 15 分钟。',acceptedProposals:[{clarificationId:'Q-1',baseRecommendation:'超时时长设为 30 分钟。',finalText:'超时时长改为 15 分钟。'}]})).rejects.toThrow('仅支持功能与需求清单调整');
   });
 });

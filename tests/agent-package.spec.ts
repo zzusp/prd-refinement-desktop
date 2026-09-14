@@ -29,7 +29,7 @@ async function fixture(root:string){
 }
 
 describe('Agent 交付包',()=>{
-  it('包质量保留真实执行与检查状态，业务待确认不阻断交付',async()=>{
+  it('包质量保留真实执行与检查状态，历史业务问题不参与新清单交付',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
     project.clarifications=[{id:'Q',question:'如何处理？',reason:'待确认',level:'blocking',affectedIds:['R-001'],state:'open'}];
     expect(packageQuality(task,project).state).toBe('ready');
@@ -37,6 +37,11 @@ describe('Agent 交付包',()=>{
     project.delivery={state:'unchecked',inputHash:'x',resultHash:'y',issueIds:[],unverifiedScopeIds:[],policyVersion:2};
     project.audit={passed:true,issues:[]};expect(packageQuality(task,project).state).toBe('unchecked');
     task.status='failed';expect(packageQuality(task,project).state).toBe('blocked');
+    task.status='completed';project.delivery.state='ready';
+    project.audit={passed:false,issues:[{id:'A',direction:'核查',type:'evidence',sourceUnitIds:['S-1'],affectedIds:['R-001'],detail:'引用未通过',disposition:'open'}]};
+    expect(packageQuality(task,project)).toMatchObject({state:'blocked',issueIds:['A']});
+    project.audit={passed:true,issues:[]};project.delivery.unverifiedScopeIds=['F-001'];
+    expect(packageQuality(task,project).state).toBe('unchecked');
   });
   it('执行失败不能由导出范围投影改成 ready',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
@@ -46,7 +51,7 @@ describe('Agent 交付包',()=>{
     const snapshot=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     expect(snapshot.delivery.state).toBe('blocked');
   });
-  it('严格要求冻结原始文件，不允许用转录代替；保留完整建议与用户决定',async()=>{
+  it('严格要求冻结原始文件，不允许用转录代替；新包不输出历史建议与用户决定',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
     const snapshot=project.inputSnapshotPath;delete project.inputSnapshotPath;
     await expect(writeAgentPackage(project,task,root,'missing-snapshot')).rejects.toThrow('缺少冻结原始资料');
@@ -55,10 +60,16 @@ describe('Agent 交付包',()=>{
     delete project.sourceUnits[0].logicalPath;
     const item={id:'Q-1',question:'退款口径？',reason:'原文未定',affectedIds:['R-001'],sourceRefs:[{sourceUnitId:'S-1'}],state:'open' as const,resolutionProposal:{recommendation:'含税',rationale:'账务一致',impact:'包含税额',confirmation:'确认口径',alternatives:['不含税'],sourceRefs:[{sourceUnitId:'S-1'}]},userDecision:{text:'不含税',confirmedAt:'2026-09-14',status:'pending-prd-sync' as const,operationId:'OP-1'}};
     project.clarifications=[item];const result=await writeAgentPackage(project,task,root,'decided');
-    const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
-    expect(pending.items[0].clarification).toEqual(item);expect(project.requirements[0].text).toBe('用户提交订单');
+    expect(await readdir(result.directory)).not.toContain('pending.json');
+    const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
+    expect(Object.keys(requirements)).toEqual(['schemaVersion','project','task','delivery','features','requirements','sources']);
+    expect(Object.keys(requirements.requirements[0])).toEqual(['id','featureId','text','sourceRefs']);
+    expect(Object.keys(requirements.features[0])).toEqual(['id','name','sourceRefs','requirementIds']);
+    const exported=[await readFile(path.join(result.directory,'README.md'),'utf8'),await readFile(path.join(result.directory,'features','F-001.md'),'utf8'),JSON.stringify(requirements),JSON.stringify(result.manifest)].join('\n');
+    for(const legacy of ['clarifications','resolutionProposal','userDecision','pendingItemCount','unmetDependencyCount','blockedFeatureIds','退款口径？','不含税'])expect(exported).not.toContain(legacy);
+    expect(project.clarifications).toEqual([item]);expect(project.requirements[0].text).toBe('用户提交订单');
   });
-  it('本期存在待处理事项时仍交付需求，并在机器入口保留级别、依据和影响',async()=>{
+  it('历史问题不输出，平台校验失败仍将清单标记为草稿并保留任务诊断',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
     const base={question:'是否需要在本期明确订单备注长度？',reason:'原文未明确',knownFacts:'订单可以提交',unresolvedPoint:'备注长度',impact:'不改变本期核心流程',levelReason:'已有明确默认口径',sourceRefs:[{sourceUnitId:'S-1'}],affectedIds:['R-001'],state:'open' as const};
     project.clarifications=[{id:'Q-S',level:'suggestion',defaultResolution:'暂不处理时保持原文规则',...base},{id:'Q-I',level:'ignorable',...base}];
@@ -67,25 +78,27 @@ describe('Agent 交付包',()=>{
     project.audit={passed:false,issues:[{id:'A-1',direction:'依据核查',type:'evidence',sourceUnitIds:['S-1'],affectedIds:['R-001'],detail:'提交条件的引用范围需要复核',disposition:'open'}]};
     const result=await writeAgentPackage(project,task,root,'with-open-items');
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
-    const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
-    const implementation=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
     expect(result.manifest.qualityState).toBe('blocked');
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toContain('R-001');
-    expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'Q-B',kind:'clarification',level:'blocking',impact:'会改变订单状态',evidence:[{sourceUnitId:'S-1'}]})]));
-    expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'A-1',kind:'platform-issue',level:'blocking',evidence:[{sourceUnitId:'S-1'}]})]));
-    expect(requirements.audit.issues.map((item:{id:string})=>item.id)).toContain('A-1');
+    expect(requirements.delivery.state).toBe('blocked');
+    expect(await readdir(result.directory)).not.toContain('pending.json');
+    expect(requirements).not.toHaveProperty('audit');
+    expect(requirements).not.toHaveProperty('clarifications');
+    expect(project.audit.issues.map(item=>item.id)).toContain('A-1');
+    expect(await readFile(path.join(result.directory,'README.md'),'utf8')).toContain('不能作为正式交付包');
   });
   it('从同一快照生成、回读并原子发布完整需求包',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=await fixture(root);const assetPath=path.join(root,'原始图片.png'),asset=Buffer.from('fixture-image');await writeFile(assetPath,asset);project.sourceUnits[0].asset={path:assetPath,mimeType:'image/png',sha256:hash(asset),readStatus:'read'};const result=await writeAgentPackage(project,task,root,'delivery-1');
     expect(path.basename(result.directory)).toBe('delivery-1');expect(result.manifest.qualityState).toBe('ready');
-    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','checklist.csv','checklist.xlsx','features','manifest.json','pending.json','requirements.json','sources']);
-    expect(result.manifest.schemaVersion).toBe(3);
+    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','checklist.csv','checklist.xlsx','features','manifest.json','requirements.json','sources']);
+    expect(result.manifest.schemaVersion).toBe(4);
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toEqual(['R-001','R-900']);expect(requirements.delivery.state).toBe('ready');
     expect(requirements.sources[0].asset.path).toBe(`sources/assets/${hash(asset)}.png`);expect(JSON.stringify(requirements)).not.toContain(assetPath);
     const feature=await readFile(path.join(result.directory,'features','F-001.md'),'utf8');
-    expect(feature).toContain('用户提交订单');expect(feature).toContain('## 适用的通用约束');expect(feature).toContain('操作前校验登录状态');
+    expect(feature).toContain('用户提交订单');expect(feature).not.toContain('## 适用的通用约束');
+    expect(await readFile(path.join(result.directory,'features','F-900.md'),'utf8')).toContain('操作前校验登录状态');
     const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('(features/F-001.md)');
     expect(readme).toContain('checklist.csv');expect(readme).toContain('先完整阅读');
     const implementation=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
@@ -116,22 +129,18 @@ describe('Agent 交付包',()=>{
     project.clarifications.push({id:'Q-B',level:'blocking',question:'取消后库存如何处理？',reason:'原文未明确',affectedIds:['R-002'],state:'open'});
     const result=await writeAgentPackage(project,task,root,'scoped', {selectedFeatureIds:['F-001','F-002']});
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
-    const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
-    const implementation=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
     expect(result.manifest.selectedFeatureIds).toEqual(['F-001','F-002']);
-    expect(result.manifest.executableFeatureIds).toEqual(['F-001','F-002']);
-    expect(result.manifest.blockedFeatureIds).toEqual([]);
     expect(requirements.features.map((item:{id:string})=>item.id)).toEqual(['F-001','F-002','F-900']);
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toEqual(['R-001','R-900','R-003']);
-    expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'R-002',kind:'excluded-requirement'})]));
+    expect(await readdir(result.directory)).not.toContain('pending.json');
     expect(await readdir(path.join(result.directory,'features'))).toEqual(expect.arrayContaining(['F-001.md','F-900.md']));
     expect(await readdir(path.join(result.directory,'features'))).toContain('F-002.md');
     const workbook=new (await import('exceljs')).default.Workbook();await workbook.xlsx.readFile(path.join(result.directory,'checklist.xlsx'));
     expect(workbook.getWorksheet('需求清单')?.rowCount).toBe(4);
-    expect(workbook.getWorksheet('需求清单')?.rowCount).toBe(4);
+    expect(workbook.worksheets.map(sheet=>sheet.name)).toEqual(['需求清单','阅读说明']);
   });
 
-  it('本期需求依赖范围外需求时保留本期需求并记录未满足依赖',async()=>{
+  it('仅输出本期模块与需求，不将历史关系转成待处理事项',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=await fixture(root);
     project.sourceUnits.push({id:'S-3',label:'支付',kind:'paragraph',excerpt:'订单提交后发起支付。',location:'第 3 段',status:'processed'});
@@ -140,14 +149,11 @@ describe('Agent 交付包',()=>{
     project.relations=[{id:'REL-1',sourceRequirementId:'R-001',targetRequirementId:'R-002',kind:'depends-on',sourceRefs:[{sourceUnitId:'S-3'}]}];
     const result=await writeAgentPackage(project,task,root,'dependency', {selectedFeatureIds:['F-001','F-002']});
     const requirements=JSON.parse(await readFile(path.join(result.directory,'requirements.json'),'utf8'));
-    const pending=JSON.parse(await readFile(path.join(result.directory,'pending.json'),'utf8'));
-    const implementation=await parseCsv(await readFile(path.join(result.directory,'checklist.csv'),'utf8'));
-    expect(result.manifest.executableFeatureIds).toEqual(['F-001']);
-    expect(result.manifest.blockedFeatureIds).toEqual([]);
+    expect(result.manifest.selectedFeatureIds).toEqual(['F-001']);
     expect(requirements.requirements.map((item:{id:string})=>item.id)).toContain('R-001');
     expect(requirements.requirements.map((item:{id:string})=>item.id)).not.toContain('R-002');
-    expect(pending.items).toEqual(expect.arrayContaining([expect.objectContaining({id:'REL-1',kind:'unmet-dependency',requirementIds:['R-001','R-002']})]));
-    expect(result.manifest.unmetDependencyCount).toBe(1);
+    expect(requirements).not.toHaveProperty('relations');
+    expect(await readdir(result.directory)).not.toContain('pending.json');
     expect(result.manifest.qualityState).toBe('ready');
   });
 

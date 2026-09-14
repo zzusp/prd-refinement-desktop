@@ -109,7 +109,6 @@
 - 导出必须复制冻结原始文件到 sources/files/，缺失时失败；原文位置必须指向该目录中的确切文件。实现先读 PRD，检查清单仅查漏。
 
 - 当前产品边界以 `docs/spec/prd-checklist-only-output.md` 为准：仅输出功能模块、需求清单和出处，不生成待处理事项、建议、主张或独立条件栏目。
-- 七阶段执行、九节点 Runtime、任务级调整、局部复核和版本记录保留。平台结构或引用校验失败仍显示在执行记录中，不得隐藏。
-- 清单生成过程中的核查问题统一称为“清单校验明细”，在执行记录中默认折叠，仅供追溯，不表达业务待办或需要用户决定的事项。
+- 七阶段执行、九节点 Runtime、任务级调整、局部复核和版本记录保留。平台内部结构、引用和整理校验不进入用户结果页；真实任务执行失败仍在执行记录中显示错误与恢复操作。
 - 旧版任务仍可只读查看全部需求；展示层从旧 `title/behavior/sourceUnitIds` 读取短标题和来源，不改写持久化数据。
 - 交付主文件为 checklist.csv，七列固定为 feature_id、feature_source、requirement_id、requirement、source_location、check_status、notes。Excel 与 JSON 同源，不生成待处理事项工作表或 pending.json。

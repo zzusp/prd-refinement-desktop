@@ -37,7 +37,6 @@ import type {
   TaskArtifact,
 } from "./types";
 import { MaterialWorkspace } from "./MaterialWorkspace";
-import { ResultIssues } from "./ResultIssues";
 import {
   featureTitle,
   readableContext,
@@ -1648,7 +1647,6 @@ function Results({
 export function ExecutionRecord({ task, now, failureAction, onRecover }: { task: AnalysisTask; now: number; failureAction?: "retry" | "restart"; onRecover?: (action: "retry" | "restart") => void }) {
   return (
     <section className="execution-record">
-      <ResultIssues project={task.project} />
       {task.error && task.status === "failed" && (
         <div className="workspace-error" role="alert">
           <AlertTriangle />

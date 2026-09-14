@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { SourceRef, SourceUnit } from '../src/types.js';
+import type { RequirementDetail, SourceRef, SourceUnit } from '../src/types.js';
 
 export interface SourceEvidence {
   id: string;
@@ -7,6 +7,20 @@ export interface SourceEvidence {
   start: number;
   end: number;
   text: string;
+}
+
+export interface DetailEvidenceIssue {
+  code: 'required'|'type'|'empty'|'unknown-field'|'unknown-evidence'|'duplicate';
+  path: string;
+  expected: string;
+  actual: string;
+}
+
+export class DetailEvidenceValidationError extends Error {
+  constructor(readonly issues:DetailEvidenceIssue[]) {
+    super(issues.map(issue=>`${issue.path}：需要${issue.expected}，实际${issue.actual}`).join('\n'));
+    this.name='DetailEvidenceValidationError';
+  }
 }
 
 const sourceText = (unit: SourceUnit) => unit.asset?.extractedText ?? unit.excerpt;
@@ -100,6 +114,35 @@ export function materializeEvidenceSelections(value: Record<string, unknown>, ca
   return visit(value, 'response') as Record<string, unknown>;
 }
 
+/** 细化节点只返回内容与证据对；来源、绑定和初始状态由程序确定性生成。 */
+export function materializeDetailEvidenceSelections(value:Record<string,unknown>,catalog:SourceEvidence[]):Record<string,unknown> {
+  const issues:DetailEvidenceIssue[]=[],byId=new Map(catalog.map(item=>[item.id,item]));
+  const actual=(value:unknown)=>Array.isArray(value)?`数组(${value.length})`:value===null?'null':typeof value;
+  const requiredText=(value:unknown,path:string)=>{if(typeof value!=='string'){issues.push({code:'type',path,expected:'非空文本',actual:actual(value)});return''}if(!value.trim()){issues.push({code:'empty',path,expected:'非空文本',actual:'空文本'});return''}return value.trim()};
+  const evidenceIds=(value:unknown,path:string,allowEmpty=false)=>{
+    if(!Array.isArray(value)){issues.push({code:'type',path,expected:allowEmpty?'证据编号数组':'非空证据编号数组',actual:actual(value)});return[] as string[]}
+    if(!allowEmpty&&!value.length)issues.push({code:'empty',path,expected:'非空证据编号数组',actual:'空数组'});
+    const ids:string[]=[];for(const [index,item] of value.entries()){if(typeof item!=='string'||!item.trim()){issues.push({code:'type',path:`${path}[${index}]`,expected:'非空证据编号',actual:actual(item)});continue}const id=item.trim();if(!byId.has(id))issues.push({code:'unknown-evidence',path:`${path}[${index}]`,expected:'本批 evidenceCatalog 中的证据编号',actual:id});ids.push(id)}
+    if(new Set(ids).size!==ids.length)issues.push({code:'duplicate',path,expected:'不重复的证据编号',actual:'包含重复项'});return ids;
+  };
+  const record=(raw:unknown,path:string)=>{if(!raw||typeof raw!=='object'||Array.isArray(raw)){issues.push({code:'type',path,expected:'对象',actual:actual(raw)});return undefined}return raw as Record<string,unknown>};
+  const paired=(raw:unknown,path:string)=>{const item=record(raw,path);if(!item)return{text:'',ids:[] as string[]};const unknown=Object.keys(item).filter(key=>!['text','evidenceIds'].includes(key));for(const key of unknown)issues.push({code:'unknown-field',path:`${path}.${key}`,expected:'仅 text、evidenceIds',actual:'未知字段'});return{text:requiredText(item.text,`${path}.text`),ids:evidenceIds(item.evidenceIds,`${path}.evidenceIds`)};};
+  const pairedList=(raw:unknown,path:string)=>{if(!Array.isArray(raw)){issues.push({code:'type',path,expected:'内容与证据对象数组',actual:actual(raw)});return[] as Array<{text:string;ids:string[]}>}return raw.map((item,index)=>paired(item,`${path}[${index}]`));};
+  if(!Array.isArray(value.requirements))issues.push({code:'type',path:'requirements',expected:'需求对象数组',actual:actual(value.requirements)});
+  const seen=new Set<string>();const requirements=(Array.isArray(value.requirements)?value.requirements:[]).map((raw,index)=>{
+    const path=`requirements[${index}]`,item=record(raw,path);if(!item)return undefined;
+    const allowed=new Set(['id','title','behavior','conditions','constraints','explicitAcceptanceEvidenceIds','featureId']);
+    for(const key of Object.keys(item).filter(key=>!allowed.has(key)))issues.push({code:'unknown-field',path:`${path}.${key}`,expected:'当前细化输出字段',actual:'未知或程序生成字段'});
+    const id=requiredText(item.id,`${path}.id`),title=requiredText(item.title,`${path}.title`);if(id){if(seen.has(id))issues.push({code:'duplicate',path:`${path}.id`,expected:'唯一需求 ID',actual:id});seen.add(id)}
+    const behavior=paired(item.behavior,`${path}.behavior`),conditions=pairedList(item.conditions,`${path}.conditions`),constraints=pairedList(item.constraints,`${path}.constraints`),acceptanceIds=evidenceIds(item.explicitAcceptanceEvidenceIds,`${path}.explicitAcceptanceEvidenceIds`,true);
+    const featureId=item.featureId===undefined?undefined:requiredText(item.featureId,`${path}.featureId`),refs=(ids:string[])=>ids.flatMap(id=>{const evidence=byId.get(id);return evidence?[{sourceUnitId:evidence.sourceUnitId,start:evidence.start,end:evidence.end}]:[]});
+    const behaviorRefs=refs(behavior.ids),conditionRefs=conditions.map(entry=>refs(entry.ids)),constraintRefs=constraints.map(entry=>refs(entry.ids)),acceptanceRefs=refs(acceptanceIds),allRefs=[...behaviorRefs,...conditionRefs.flat(),...constraintRefs.flat(),...acceptanceRefs];
+    return{id,title,behavior:behavior.text,conditions:conditions.map(entry=>entry.text),constraints:constraints.map(entry=>entry.text),explicitAcceptanceConditions:acceptanceIds.map(id=>byId.get(id)?.text??''),sourceUnitIds:[...new Set(allRefs.map(ref=>ref.sourceUnitId))],ruleIds:[],state:'draft',evidenceBindings:{behavior:behaviorRefs,conditions:conditionRefs,constraints:constraintRefs,explicitAcceptanceConditions:acceptanceRefs.map(ref=>[ref])},...(featureId?{featureId}:{})} satisfies RequirementDetail&{featureId?:string};
+  }).filter((item):item is NonNullable<typeof item>=>!!item);
+  if(issues.length)throw new DetailEvidenceValidationError(issues);
+  return materializeEvidenceSelections({...value,requirements},catalog);
+}
+
 export function evidencePromptInput(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { input, catalog: [] as SourceEvidence[] };
   const result = structuredClone(input) as Record<string, unknown>;
@@ -110,6 +153,10 @@ export function evidencePromptInput(input: unknown) {
   delete result.candidateEvidenceRefs;
   const catalog = buildEvidenceCatalog(units).filter(item=>!allowedRefs||allowedRefs.some(ref=>ref.sourceUnitId===item.sourceUnitId&&item.start>=(ref.start??0)&&item.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map((item,index)=>({...item,id:`E${index+1}`}));
   if (catalog.length) {
+    if(Array.isArray(result.currentRequirements))result.currentRequirements=(result.currentRequirements as Array<RequirementDetail&{featureId?:string}>).map(requirement=>{
+      const ids=(refs:SourceRef[]|undefined)=>catalog.filter(evidence=>(refs??[]).some(ref=>ref.sourceUnitId===evidence.sourceUnitId&&evidence.start>=(ref.start??0)&&evidence.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map(evidence=>evidence.id);
+      return{id:requirement.id,title:requirement.title,behavior:{text:requirement.behavior,evidenceIds:ids(requirement.evidenceBindings?.behavior)},conditions:requirement.conditions.map((text,index)=>({text,evidenceIds:ids(requirement.evidenceBindings?.conditions[index])})),constraints:requirement.constraints.map((text,index)=>({text,evidenceIds:ids(requirement.evidenceBindings?.constraints[index])})),explicitAcceptanceEvidenceIds:ids(requirement.evidenceBindings?.explicitAcceptanceConditions.flat()),...(requirement.featureId?{featureId:requirement.featureId}:{})};
+    });
     result.sourceUnits = units.map(unit => ({id:unit.id,label:unit.label,kind:unit.kind,location:unit.location,...(unit.logicalPath?{logicalPath:unit.logicalPath}:{}),...(unit.sourceRole?{sourceRole:unit.sourceRole}:{}),...(unit.context?{context:unit.context}:{}),...(unit.asset?{asset:{mimeType:unit.asset.mimeType,readStatus:unit.asset.readStatus}}:{})}));
     result.evidenceCatalog = candidateRefs?catalog.map(evidence=>({...evidence,candidateIds:candidateRefs.filter(item=>item.refs.some(ref=>ref.sourceUnitId===evidence.sourceUnitId&&evidence.start>=(ref.start??0)&&evidence.end<=(ref.end??Number.MAX_SAFE_INTEGER))).map(item=>item.candidateId)})):catalog;
   }

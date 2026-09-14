@@ -25,19 +25,9 @@ const detail = (
   sourceUnitId: string,
 ) => ({
   id,
-  title,
-  behavior,
-  conditions: [],
-  constraints: [],
-  explicitAcceptanceConditions: [],
-  sourceUnitIds: [sourceUnitId],
-  evidenceBindings: {
-    behavior: [{ sourceUnitId }],
-    conditions: [],
-    constraints: [],
-    explicitAcceptanceConditions: [],
-  },
-  ruleIds: [],
+  featureId: id==='R1'?'F1':id==='R2'?'F2':'F3',
+  text: behavior,
+  sourceRefs: [{ sourceUnitId,start:0,end:behavior.length+1 }],
   state: "reviewed" as const,
 });
 const project = (): PrdProject => ({
@@ -57,6 +47,7 @@ const project = (): PrdProject => ({
   features: [
     {
       id: "F1",
+      kind: "function",
       name: "提交订单",
       sourceUnitIds: ["S1"],
       sourceRefs: [{ sourceUnitId: "S1" }],
@@ -66,6 +57,7 @@ const project = (): PrdProject => ({
     },
     {
       id: "F2",
+      kind: "function",
       name: "取消订单",
       sourceUnitIds: ["S2"],
       sourceRefs: [{ sourceUnitId: "S2" }],
@@ -75,6 +67,7 @@ const project = (): PrdProject => ({
     },
     {
       id: "F3",
+      kind: "function",
       name: "查询订单",
       sourceUnitIds: ["S3"],
       sourceRefs: [{ sourceUnitId: "S3" }],
@@ -88,32 +81,7 @@ const project = (): PrdProject => ({
     detail("R2", "取消", "用户可以取消订单", "S2"),
     detail("R3", "查询", "用户可以查询订单", "S3"),
   ],
-  clarifications: [
-    {
-      id: "Q1",
-      question: "是否允许重复提交？",
-      reason: "原文未说明",
-      affectedIds: ["R1"],
-      state: "open",
-      level: "blocking",
-    },
-    {
-      id: "Q2",
-      question: "提交后是否通知？",
-      reason: "原文未说明",
-      affectedIds: ["R1"],
-      state: "open",
-      level: "suggestion",
-    },
-    {
-      id: "Q3",
-      question: "取消原因是否必填？",
-      reason: "原文未说明",
-      affectedIds: ["R2"],
-      state: "open",
-      level: "blocking",
-    },
-  ],
+  clarifications: [],
 });
 const req = (
   input: any,
@@ -126,16 +94,12 @@ const req = (
     : input.evidenceCatalog.find((x: any) => x.text.includes(behavior));
   return {
     id: targetId,
-    title: behavior,
-    behavior: { text: behavior, evidenceIds: [chosen.id] },
-    conditions: [],
-    constraints: [],
-    explicitAcceptanceEvidenceIds: [],
+    text: behavior,
+    evidenceIds: [chosen.id],
   };
 };
 const empty = () => ({
   requirementActions: [],
-  clarificationActions: [],
   relationActions: [],
 });
 const request = (feedback: string) => ({
@@ -145,454 +109,101 @@ const request = (feedback: string) => ({
 });
 const adapter = (
   fn: (call: Parameters<AdjustmentModelAdapter["generate"]>[0]) => unknown,
-): AdjustmentModelAdapter => ({ generate: async (call) => call.accept(fn(call) as Record<string, unknown>) });
+): AdjustmentModelAdapter => ({ async generate(call) {
+  const contract=nodeContracts[call.operation];
+  return executeNode({...contract,id:call.operation,parameters:schemaToJson(contract.proposal),instructions:call.instruction,accept:value=>{
+    try{return call.accept(value);}catch(error){
+      if(error instanceof DomainValidationError||error instanceof DetailEvidenceValidationError)throw new CandidateValidationError(error.issues);
+      throw error;
+    }
+  }},{workItemId:call.operation,executionId:"test",input:call.input,configuration:{},receipts:{},save:async()=>{},assert(){},runtime:async()=>({executeOperation:async()=>({completion:"completed",value:fn(call)})}) as unknown as AnalysisRuntime});
+}});
 
-describe("任务级自然语言批量调整", () => {
-  it("其他功能变化也进入生成和修正的完整项目依赖哈希", async () => {
-    const captured: Array<{ operation: string; input: any }> = [];
-    const value = project();
-    const engine = new RefinementAdjustmentEngine(adapter(call => {
-      if (call.operation === 'adjustmentParse') return { operations: [{ id: 'O1', quote: '精简提交', kind: 'organization', instruction: '精简', featureIds: ['F1'], clarificationIds: [] }], pending: [] };
-      captured.push({ operation: call.operation, input: call.input });
-      if (call.operation === 'adjustmentReview') return { passed: false, issues: ['须修正'], clarificationResolutions: [] };
-      return empty();
-    }), () => new Date('2026-09-14T00:00:00Z'));
-    await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
-    value.requirements.find(item => item.id === 'R2')!.title = '另一功能变化';
-    await engine.run({ taskId: 'T', version: 1, project: value }, request('精简提交'));
-    const generated = captured.filter(item => item.operation === 'adjustmentGenerate').map(item => item.input);
-    const repaired = captured.filter(item => item.operation === 'adjustmentRepair').map(item => item.input.originalInput);
-    expect(generated).toHaveLength(2);
-    expect(generated[0].currentRequirements).toEqual(generated[1].currentRequirements);
-    expect(generated[0].projectContextHash).not.toBe(generated[1].projectContextHash);
-    expect(repaired.map(item => item.projectContextHash)).toEqual(generated.map(item => item.projectContextHash));
+
+const op=(quote="精简提交",kind="organization",featureIds=["F1"],id="O1")=>({id,quote,kind,instruction:quote,featureIds});
+describe("仅输出清单的任务级调整",()=>{
+  it("组织调整通过完整节点契约复核，保留出处且范围外不变",async()=>{
+    const value=project(),calls:string[]=[],inputs:unknown[]=[];
+    const engine=new RefinementAdjustmentEngine(adapter(call=>{
+      calls.push(call.operation);inputs.push(call.input);
+      if(call.operation==="adjustmentParse")return {operations:[op()]};
+      if(call.operation==="adjustmentReview")return {passed:true,issues:[]};
+      const requirement=req(call.input,"R1","用户可以提交订单");requirement.text="支持提交订单";
+      return {...empty(),requirementActions:[{action:"update",targetId:"R1",requirement}]};
+    }));
+    const result=await engine.run({taskId:"T",version:1,project:value},request("精简提交"));
+    expect(result.status,result.error).toBe("completed");expect(calls).toEqual(["adjustmentParse","adjustmentGenerate","adjustmentReview"]);
+    expect(result.project.requirements[0]).toMatchObject({id:"R1",text:"支持提交订单",sourceRefs:[{sourceUnitId:"S1",start:0,end:9}]});
+    expect(result.project.requirements.slice(1)).toEqual(value.requirements.slice(1));expect(result.project.clarifications).toEqual([]);
+    for(const input of inputs)expect(JSON.stringify(input)).not.toMatch(/"(?:clarifications|resolutionProposal|beforeClarifications)"/);
   });
-  it("真实执行器贯穿调整输入、候选和正式结果契约", async () => {
-    const value = project(); value.clarifications = [];
-    value.features.forEach(feature => { feature.kind = "function"; });
-    const calls: string[] = [];
-    const engine = new RefinementAdjustmentEngine({
-      async generate(call) {
+  it("新增或替换业务规则只记录未执行，不扩写清单",async()=>{
+    const value=project(),calls:string[]=[];
+    const engine=new RefinementAdjustmentEngine(adapter(call=>{calls.push(call.operation);return {operations:[op("允许重复提交","business-fact"),op("取消订单改为删除","replace-fact",["F2"],"O2")]};}));
+    const result=await engine.run({taskId:"T",version:1,project:value},request("允许重复提交；取消订单改为删除"));
+    expect(calls).toEqual(["adjustmentParse"]);expect(result.results.map(x=>x.status)).toEqual(["deferred","deferred"]);
+    expect(result.project.requirements).toEqual(value.requirements);expect(result.project.sourceUnits).toEqual(value.sourceUnits);
+    expect(result.project.clarifications).toEqual([]);expect(result.userEvidence.every(x=>!x.businessFact)).toBe(true);
+  });
+  it("模型返回澄清动作被结构契约拒绝，原项目保持不变",async()=>{
+    const value=project(),engine=new RefinementAdjustmentEngine(adapter(call=>call.operation==="adjustmentParse"?{operations:[op()]}:{...empty(),clarificationActions:[]}));
+    const result=await engine.run({taskId:"T",version:1,project:value},request("精简提交"));
+    expect(result.status).toBe("failed");expect(result.error).toContain("clarificationActions");expect(result.project.requirements).toEqual(value.requirements);
+  });
+  it("旧建议、澄清引用与旧版结果在调用模型前拒绝",async()=>{
+    let calls=0;const engine=new RefinementAdjustmentEngine(adapter(()=>{calls++;throw Error("不应调用模型");})),value=project();
+    for(const patch of [{acceptedProposalIds:["Q1"]},{acceptedProposals:[{clarificationId:"Q1",baseRecommendation:"拒绝重复",finalText:"拒绝重复"}]},{references:[{kind:"clarification" as const,id:"Q1"}]}])await expect(engine.run({taskId:"T",version:1,project:value},{...request("精简提交"),...patch})).rejects.toThrow("仅支持功能与需求");
+    value.clarifications=[{id:"Q1",question:"旧问题",reason:"历史记录",affectedIds:["R1"],state:"open"}];
+    await expect(engine.run({taskId:"T",version:1,project:value},request("精简提交"))).rejects.toThrow("旧版结果仅供查看");expect(calls).toBe(0);
+  });
+  it("复核失败进入独立修正并再复核，仍失败时回滚",async()=>{
+    for(const passes of [true,false]){
+      const value=project(),calls:string[]=[];let reviews=0;
+      const engine=new RefinementAdjustmentEngine(adapter(call=>{
         calls.push(call.operation);
-        const contract = nodeContracts[call.operation];
-        const response = call.operation === "adjustmentParse"
-          ? { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] }
-          : call.operation === "adjustmentReview"
-            ? { passed: true, issues: [], clarificationResolutions: [] }
-            : { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement: req(call.input, "R1", "用户可以提交订单") }] };
-        return executeNode({ ...contract, id: call.operation, parameters: schemaToJson(contract.proposal), instructions: call.instruction, accept: value => {
-          try { return call.accept(value); }
-          catch (error) {
-            if (error instanceof DomainValidationError || error instanceof DetailEvidenceValidationError) throw new CandidateValidationError(error.issues);
-            throw error;
-          }
-        } }, {
-          workItemId: call.operation, executionId: "test", input: call.input, configuration: {}, receipts: {}, save: async () => {}, assert() {},
-          runtime: async () => ({ executeOperation: async () => ({ completion: "completed", value: response }) }) as unknown as AnalysisRuntime,
-        });
-      },
-    });
-    const result = await engine.run({ taskId: "T", version: 1, project: value }, request("精简提交"));
-    expect(result.status, result.error).toBe("completed");
-    expect(calls).toEqual(["adjustmentParse", "adjustmentGenerate", "adjustmentReview"]);
-  });
-  it("显式节点身份与领域验收在适配器提交之前执行", async () => {
-    const operations: string[] = [], accepted: string[] = [];
-    const engine = new RefinementAdjustmentEngine({
-      async generate(call) {
-        operations.push(call.operation);
-        const value = call.operation === "adjustmentParse"
-          ? { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] }
-          : { ...empty(), requirementActions: [{ action: "delete", targetId: "R2" }] };
-        const result = call.accept(value);
-        accepted.push(call.operation);
-        return result;
-      },
-    });
-    const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
-    expect(operations).toEqual(["adjustmentParse", "adjustmentGenerate"]);
-    expect(accepted).toEqual(["adjustmentParse"]);
-    expect(result.status).toBe("failed");
-    expect(result.error).toContain("需求动作越出当前功能");
-    expect(result.project.requirements).toEqual(project().requirements);
-  });
-
-  it("配对协议拒绝空证据及模型生成内部状态", async () => {
-    for (const invalid of ["empty-evidence", "internal-state"]) {
-      const engine = new RefinementAdjustmentEngine(adapter(call => {
-        if (call.operation === "adjustmentParse") return { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] };
-        const requirement: any = req(call.input, "R1", "用户可以提交订单");
-        if (invalid === "empty-evidence") requirement.behavior.evidenceIds = [];
-        else requirement.state = "reviewed";
-        return { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement }] };
+        if(call.operation==="adjustmentParse")return {operations:[op()]};
+        if(call.operation==="adjustmentReview"){const passed=++reviews>1&&passes;return {passed,issues:passed?[]:["丢失必要限定"]};}
+        const input=call.operation==="adjustmentRepair"?(call.input as any).originalInput:call.input;
+        return {...empty(),requirementActions:[{action:"update",targetId:"R1",requirement:req(input,"R1","用户可以提交订单")}]};
       }));
-      const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
-      expect(result.status).toBe("failed");
-      expect(result.error).toContain(invalid === "empty-evidence" ? "非空证据编号数组" : "state");
-      expect(result.project.requirements).toEqual(project().requirements);
+      const result=await engine.run({taskId:"T",version:1,project:value},request("精简提交"));
+      expect(calls).toEqual(["adjustmentParse","adjustmentGenerate","adjustmentReview","adjustmentRepair","adjustmentReview"]);
+      expect(result.status).toBe(passes?"completed":"failed");if(!passes)expect(result.project.requirements).toEqual(value.requirements);
     }
   });
-
-  it("依据复核失败后使用独立修正身份并重新验收", async () => {
-    const calls: string[] = [];
-    let reviews = 0;
-    const engine = new RefinementAdjustmentEngine(adapter(call => {
-      calls.push(call.operation);
-      if (call.operation === "adjustmentParse") return { operations: [{ id: "O1", quote: "精简提交", kind: "organization", instruction: "精简", featureIds: ["F1"], clarificationIds: [] }], pending: [] };
-      if (call.operation === "adjustmentReview") return { passed: ++reviews > 1, issues: reviews === 1 ? ["表达不准确"] : [], clarificationResolutions: [] };
-      const input = call.operation === "adjustmentRepair" ? (call.input as any).originalInput : call.input;
-      const requirement = req(input, "R1", "用户可以提交订单");
-      return { ...empty(), requirementActions: [{ action: "update", targetId: "R1", requirement }] };
-    }));
-    const result = await engine.run({ taskId: "T", version: 1, project: project() }, request("精简提交"));
-    expect(result.status).toBe("completed");
-    expect(calls).toEqual(["adjustmentParse", "adjustmentGenerate", "adjustmentReview", "adjustmentRepair", "adjustmentReview"]);
-    const requirement = result.project.requirements.find(item => item.id === "R1")!;
-    expect(requirement.behavior).toBe("用户可以提交订单");
-    expect(requirement.sourceUnitIds).toEqual(["S1"]);
-    expect(requirement.evidenceBindings?.behavior[0]).toMatchObject({ sourceUnitId: "S1", start: 0 });
+  it("空证据、模型内部状态与越界改写均无法提交",async()=>{
+    for(const invalid of ["evidence","state","target"]){
+      const value=project(),engine=new RefinementAdjustmentEngine(adapter(call=>{
+        if(call.operation==="adjustmentParse")return {operations:[op()]};
+        const requirement:any=req(call.input,"R1","用户可以提交订单");
+        if(invalid==="evidence")requirement.evidenceIds=[];if(invalid==="state")requirement.state="reviewed";
+        return {...empty(),requirementActions:[{action:"update",targetId:invalid==="target"?"R2":"R1",requirement}]};
+      }));
+      const result=await engine.run({taskId:"T",version:1,project:value},request("精简提交"));
+      expect(result.status).toBe("failed");expect(result.project.requirements).toEqual(value.requirements);
+    }
   });
-
-  it("跨两功能只处理命中范围，同一功能的多条意见只生成一次", async () => {
-    const feedback = "提交订单合并描述；提交订单标题简化；取消订单展开步骤。",
-      generated: string[] = [];
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [
-              {
-                id: "O1",
-                quote: "提交订单合并描述",
-                kind: "organization",
-                instruction: "合并",
-                featureIds: ["F1"],
-                clarificationIds: [],
-              },
-              {
-                id: "O2",
-                quote: "提交订单标题简化",
-                kind: "organization",
-                instruction: "简化",
-                featureIds: ["F1"],
-                clarificationIds: [],
-              },
-              {
-                id: "O3",
-                quote: "取消订单展开步骤",
-                kind: "organization",
-                instruction: "展开",
-                featureIds: ["F2"],
-                clarificationIds: [],
-              },
-            ],
-            pending: [],
-          };
-        if (call.title.includes("依据核查"))
-          return { passed: true, issues: [], clarificationResolutions: [] };
-        generated.push(call.title);
-        return empty();
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: project() },
-      request(feedback),
-    );
-    expect(run.status).toBe("completed");
-    expect(generated).toHaveLength(2);
-    expect(generated.filter((x) => x.includes("提交订单"))).toHaveLength(1);
-    expect(run.diff.updatedFeatureIds).toEqual(["F1", "F2"]);
-    expect(run.project.features.find((x) => x.id === "F3")).toEqual(
-      project().features[2],
-    );
+  it("关系接受有效来源和两端，拒绝自引用、未知两端和未知证据",async()=>{
+    for(const invalid of ["none","self","target","evidence"]){
+      const value=project(),engine=new RefinementAdjustmentEngine(adapter(call=>{
+        if(call.operation==="adjustmentParse")return {operations:[op()]};
+        if(call.operation==="adjustmentReview")return {passed:true,issues:[]};
+        return {...empty(),relationActions:[{action:"create",relation:{id:"LOCAL-REL",sourceRequirementId:"R1",targetRequirementId:invalid==="self"?"R1":invalid==="target"?"MISSING":"R2",kind:"affects",evidenceIds:invalid==="evidence"?["MISSING"]:req(call.input,"R1","用户可以提交订单").evidenceIds}}]};
+      }));
+      const result=await engine.run({taskId:"T",version:1,project:value},request("精简提交"));
+      expect(result.status,result.error).toBe(invalid==="none"?"completed":"failed");
+      if(invalid==="none")expect(result.project.relations?.[0]).toMatchObject({sourceRequirementId:"R1",targetRequirementId:"R2",sourceRefs:[{sourceUnitId:"S1",start:0,end:9}]});
+      else expect(result.project.relations).toBeUndefined();
+    }
   });
-
-  it("按原文片段分离整理指令和业务事实，整理指令不能充当依据", async () => {
-    const feedback = "提交订单写得更简洁；提交订单允许重复提交。";
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [
-              {
-                id: "O1",
-                quote: "提交订单写得更简洁",
-                kind: "organization",
-                instruction: "精简",
-                featureIds: ["F1"],
-                clarificationIds: [],
-              },
-              {
-                id: "O2",
-                quote: "提交订单允许重复提交",
-                kind: "business-fact",
-                instruction: "补充口径",
-                featureIds: ["F1"],
-                clarificationIds: ["Q1"],
-              },
-            ],
-            pending: [],
-          };
-        if (call.title.includes("依据核查"))
-          return { passed: true, issues: [], clarificationResolutions: [] };
-        return empty();
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: project() },
-      request(feedback),
-    );
-    expect(run.userEvidence.map((x) => [x.content, x.businessFact])).toEqual([
-      ["提交订单写得更简洁", false],
-      ["提交订单允许重复提交", true],
-    ]);
-    expect(
-      run.project.sourceUnits
-        .filter((x) => x.id.startsWith("USER-"))
-        .map((x) => x.excerpt),
-    ).toEqual(["提交订单允许重复提交"]);
-  });
-
-  it("歧义只形成待确认，不修改项目", async () => {
-    const base = project(),
-      feedback = "把审核部分展开。";
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [],
-            pending: [
-              {
-                id: "P1",
-                quote: "审核部分",
-                question: "你指的是退款审核还是发票审核？",
-                candidateFeatureIds: ["F1", "F2"],
-                candidateClarificationIds: [],
-              },
-            ],
-          };
-        throw new Error("不应生成");
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: base },
-      request(feedback),
-    );
-    expect(run.results).toEqual([
-      {
-        operationId: "P1",
-        status: "needs-confirmation",
-        featureIds: ["F1", "F2"],
-        clarificationIds: [],
-        detail: "你指的是退款审核还是发票审核？",
-      },
-    ]);
-    expect({ ...run.project, revision: 1, userEvidence: undefined }).toEqual({
-      ...base,
-      userEvidence: undefined,
-    });
-  });
-
-  it("一个答案可关闭多个明确关联澄清，defer 的问题保持 open", async () => {
-    const feedback =
-      "提交订单允许重复提交且提交后要通知；取消原因问题暂不处理。";
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [
-              {
-                id: "O1",
-                quote: "提交订单允许重复提交且提交后要通知",
-                kind: "business-fact",
-                instruction: "落实提交口径",
-                featureIds: ["F1"],
-                clarificationIds: ["Q1", "Q2"],
-              },
-              {
-                id: "O2",
-                quote: "取消原因问题暂不处理",
-                kind: "defer",
-                instruction: "保留",
-                featureIds: ["F2"],
-                clarificationIds: ["Q3"],
-              },
-            ],
-            pending: [],
-          };
-        if (call.title.includes("依据核查"))
-          return {
-            passed: true,
-            issues: [],
-            clarificationResolutions: [
-              { clarificationId: "Q1", status: "supported", reason: "已承接" },
-              { clarificationId: "Q2", status: "supported", reason: "已承接" },
-            ],
-          };
-        const input = call.input as any,
-          user = input.evidenceCatalog.find((x: any) =>
-            x.sourceUnitId.startsWith("USER-"),
-          );
-        return {
-          requirementActions: [
-            {
-              action: "update",
-              targetId: "R1",
-              requirement: req(
-                input,
-                "R1",
-                "允许重复提交且提交后通知",
-                user.sourceUnitId,
-              ),
-            },
-          ],
-          clarificationActions: [
-            {
-              action: "resolve",
-              targetId: "Q1",
-              satisfiedRequirementIds: ["R1"],
-              resolutionEvidenceIds: [user.sourceUnitId],
-            },
-            {
-              action: "resolve",
-              targetId: "Q2",
-              satisfiedRequirementIds: ["R1"],
-              resolutionEvidenceIds: [user.sourceUnitId],
-            },
-          ],
-          relationActions: [],
-        };
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: project() },
-      request(feedback),
-    );
-    expect(run.project.clarifications.find((x) => x.id === "Q1")?.state).toBe(
-      "resolved",
-    );
-    expect(run.project.clarifications.find((x) => x.id === "Q2")?.state).toBe(
-      "resolved",
-    );
-    expect(run.project.clarifications.find((x) => x.id === "Q3")?.state).toBe(
-      "open",
-    );
-    expect(run.results.find((x) => x.operationId === "O2")?.status).toBe(
-      "deferred",
-    );
-  });
-
-  it("同一原子组第二个功能失败时回滚第一个功能", async () => {
-    const feedback = "提交和取消统一精简。";
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [
-              {
-                id: "O1",
-                quote: "提交和取消统一精简",
-                kind: "organization",
-                instruction: "精简提交",
-                featureIds: ["F1"],
-                clarificationIds: [],
-                atomicGroupId: "G1",
-              },
-              {
-                id: "O2",
-                quote: "提交和取消统一精简",
-                kind: "organization",
-                instruction: "精简取消",
-                featureIds: ["F2"],
-                clarificationIds: [],
-                atomicGroupId: "G1",
-              },
-            ],
-            pending: [],
-          };
-        if (call.title.includes("依据核查"))
-          return { passed: true, issues: [], clarificationResolutions: [] };
-        if (call.title.includes("取消订单"))
-          throw new Error("取消功能生成失败");
-        const input = call.input as any;
-        const changed = req(input, "R1", "用户可以提交订单");
-        changed.title = "精简提交";
-        return {
-          requirementActions: [
-            { action: "update", targetId: "R1", requirement: changed },
-          ],
-          clarificationActions: [],
-          relationActions: [],
-        };
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: project() },
-      request(feedback),
-    );
-    expect(run.status).toBe("failed");
-    expect(run.project.requirements.find((x) => x.id === "R1")?.title).toBe(
-      "提交",
-    );
-    expect(run.diff.updatedFeatureIds).toEqual([]);
-    expect(run.results.filter((x) => x.status === "failed")).toHaveLength(2);
-  });
-
-  it("独立组一成一败时保留成功结果并返回 completed", async () => {
-    const feedback = "提交精简；取消展开。";
-    const engine = new RefinementAdjustmentEngine(
-      adapter((call) => {
-        if (call.title === "解析任务调整说明")
-          return {
-            operations: [
-              {
-                id: "O1",
-                quote: "提交精简",
-                kind: "organization",
-                instruction: "精简",
-                featureIds: ["F1"],
-                clarificationIds: [],
-              },
-              {
-                id: "O2",
-                quote: "取消展开",
-                kind: "organization",
-                instruction: "展开",
-                featureIds: ["F2"],
-                clarificationIds: [],
-              },
-            ],
-            pending: [],
-          };
-        if (call.title.includes("依据核查"))
-          return { passed: true, issues: [], clarificationResolutions: [] };
-        if (call.title.includes("取消订单"))
-          throw new Error("取消功能生成失败");
-        const input = call.input as any;
-        const changed = req(input, "R1", "用户可以提交订单");
-        changed.title = "精简提交";
-        return {
-          requirementActions: [
-            { action: "update", targetId: "R1", requirement: changed },
-          ],
-          clarificationActions: [],
-          relationActions: [],
-        };
-      }),
-    );
-    const run = await engine.run(
-      { taskId: "T", version: 1, project: project() },
-      request(feedback),
-    );
-    expect(run.status).toBe("completed");
-    expect(run.project.requirements.find((x) => x.id === "R1")?.title).toBe(
-      "精简提交",
-    );
-    expect(run.results.find((x) => x.operationId === "O1")?.status).toBe(
-      "applied",
-    );
-    expect(run.results.find((x) => x.operationId === "O2")?.status).toBe(
-      "failed",
-    );
+  it("无定位不猜测目标，同一功能多条意见只生成一次",async()=>{
+    for(const featureIds of [[],["F1"]]){
+      let generated=0;const engine=new RefinementAdjustmentEngine(adapter(call=>{
+        if(call.operation==="adjustmentParse")return {operations:[op("合并描述","organization",featureIds),op("精简条目","organization",featureIds,"O2")]};
+        if(call.operation==="adjustmentReview")return {passed:true,issues:[]};generated++;return empty();
+      }));
+      const result=await engine.run({taskId:"T",version:1,project:project()},request("合并描述；精简条目"));
+      expect(generated).toBe(featureIds.length?1:0);expect(result.status).toBe(featureIds.length?"completed":"failed");
+    }
   });
 });

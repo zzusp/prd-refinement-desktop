@@ -1,6 +1,6 @@
 # PRD 检查清单产品收敛
 
-> 状态：ACTIVE
+> 状态：DONE
 > Goal ID：prd-checklist-convergence
 > 最近维护：2026-09-14T17:28:00+08:00
 > 权威目标：D:/project/prd-refinement-desktop/docs/acceptance/prd-checklist-convergence/goal.md
@@ -34,15 +34,17 @@
 | SG5 | 仅清单模型与执行链 | 细化/核查/修正/调整均不能生成待处理事项或建议 | 完成 | Pipeline 27 结构契约反例、241 项自动测试及真实任务 T-B741D978 |
 | SG6 | 仅清单页面与导出 | 删除问题/建议入口和文件，保留执行错误与调整 | 完成 | 实际 Electron 页面回查及 168 条需求 ready 包回读 |
 | SG7 | 本轮验证与交付 | 契约反例、调度/调整/导出、UI、构建通过并更新 PR | 完成 | round-3 全绿；PR #4 待本轮提交后更新回查 |
-| SG8 | 主分支与日常实例交付 | Pipeline 27 进入 main，日常 Electron 重启并回读实际版本 | 进行中 | round-4 已确认旧实例为 Pipeline 22，新实例已加载 Pipeline 27 |
+| SG8 | 主分支与日常实例交付 | Pipeline 27 进入 main，日常 Electron 重启并回读实际版本 | 完成 | PR #5 合入 main；f64dfab 日常 Electron 与页面回读通过 |
 
 ## 当前检查点
 
 - 当前子目标：SG8
-- 唯一下一步：创建并合并目标为 main 的修复 PR，再回读 main 与实际 Electron。
+- 唯一下一步：等待后续新任务实际使用；历史 Pipeline 22 任务保留原结果。
 - 未闭环项：隔离验收使用 Terra，不代表原日常模型容量或回归已恢复；自然语言语义“零遗漏”不在自动验证能力内。
 
 ## 进展
+
+- 2026-09-14：PR #5 合入 main，merge commit `f64dfab`；本地 main 与 origin/main 精确一致。日常 Electron 从该 main 重新启动，主进程 PID `88672`；实际页面再次回读 hasPending=false、hasProposal=false。
 
 - 2026-09-14：发现 PR #4 合并到 feature/analysis-execution-recovery 时，PR #3 已先合入 main；后续分支提交没有进入 main。日常任务 T-430555BA 因此仍运行 Pipeline 22，并实际生成 1 项 suggestion、1 项 blocking。
 - 2026-09-14：将 PR #4 完整差异移植到基于当前 main 的 feature/checklist-main-delivery；241 项测试、typecheck、build、verify:premium 通过，编译产物回读为 Pipeline 27。

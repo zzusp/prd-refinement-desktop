@@ -228,8 +228,7 @@ export class AnalysisTaskScheduler {
       try { task = JSON.parse(await readFile(path.join(this.root, file), 'utf8')) as AnalysisTask; } catch { continue; }
       if (!task.id || !task.project || !Array.isArray(task.steps)) continue;
       if(this.deletedFamilies.has(task.rootTaskId??task.id))continue;
-      if(task.status==='completed'&&task.project.delivery?.state!=='ready'){task.status='needs-attention';task.progress=100;task.error='平台整理未完成：该任务的正式交付准入未通过，请重新审计当前材料。'}
-      if(task.status==='needs-attention'&&task.steps.length>0&&task.steps.every(step=>step.status==='completed'))task.progress=100;
+      if(task.status==='needs-attention'&&task.steps.length>0&&task.steps.every(step=>step.status==='completed')){task.status='completed';task.progress=100;task.error=undefined}
       if (task.checkpoint?.pipelineVersion !== CURRENT_PIPELINE_VERSION && !['completed','needs-attention'].includes(task.status)) {
         task.status = 'failed'; task.error = '旧版检查点仅供查看，请用原始材料创建新任务';
       } else if (task.status === 'running') {
@@ -514,7 +513,7 @@ export class AnalysisTaskScheduler {
             const result=path.join(workspace,'result'),packageRoot=path.join(result,task.project.delivery?.state==='ready'?'deliveries':'drafts');await mkdir(result,{recursive:true});
             const intendedVersion=baseVersion+1,written=await writeAgentPackage(task.project,{...task,resultVersion:intendedVersion},packageRoot);await this.writeAtomic(path.join(this.root,`${task.project.id}.project.json`),task.project);
             task.resultVersion=intendedVersion;task.artifacts=[...(task.artifacts??[]),{id:`A-${randomUUID().slice(0,8).toUpperCase()}`,kind:task.project.delivery?.state==='ready'?'agent-package':'draft',path:written.directory,resultVersion:intendedVersion,createdAt:Date.now()}];deliveryStep.status='completed';deliveryStep.completedAt=Date.now();deliveryStep.startedAt=undefined;
-            const ready=task.project.delivery?.state==='ready',feedbackFailed=task.adjustment?.results?.some(item=>item.status==='failed')??false;task.status=ready&&!feedbackFailed?'completed':'needs-attention';task.progress=100;task.error=feedbackFailed?'部分调整无法定位或应用，清单保持已核查结果':ready?undefined:'调整结果尚未通过平台检查';task.completedAt=Date.now();await this.publish(task);
+            const feedbackFailed=task.adjustment?.results?.some(item=>item.status==='failed')??false;task.status=feedbackFailed?'failed':'completed';task.progress=100;task.error=feedbackFailed?'部分调整无法定位或应用，清单保持已核查结果':undefined;task.completedAt=Date.now();await this.publish(task);
           });
         return;
       }
@@ -676,7 +675,7 @@ export class AnalysisTaskScheduler {
         this.assert(task, attempt); const intendedVersion=task.resultVersion??1,written=await writeAgentPackage(task.project,{...task,status:assessment.state==='ready'?'completed':task.status,resultVersion:intendedVersion},packageRoot);task.resultVersion=intendedVersion;task.artifacts=[...(task.artifacts??[]),{id:`A-${randomUUID().slice(0,8).toUpperCase()}`,kind:assessment.state==='ready'?'agent-package':'draft',path:written.directory,resultVersion:intendedVersion,createdAt:Date.now()}];
         this.assert(task, attempt); await this.writeAtomic(path.join(this.root, `${task.project.id}.project.json`), task.project);
       });
-      this.assert(task, attempt); const ready=task.project.delivery?.state==='ready';task.status = ready?'completed':'needs-attention'; task.progress = 100;task.error=ready?undefined:'平台整理未完成：正式交付准入未通过，已保留当前草稿，可重新处理。'; task.completedAt = Date.now();
+      this.assert(task, attempt); task.status = 'completed'; task.progress = 100;task.error=undefined; task.completedAt = Date.now();
       if(task.adjustment&&task.parentTaskId&&task.resultVersion===undefined){
         const rootTaskId=task.rootTaskId??task.parentTaskId,baseVersion=task.baseResultVersion??1;
         await this.withFamilyCommit(rootTaskId,async()=>{const latest=this.latestResult(rootTaskId);if(!latest||latest.id!==task.parentTaskId||latest.resultVersion!==baseVersion)throw new Error(`基础结果已更新：当前为第 ${latest?.resultVersion??baseVersion} 版；本次输入和候选已保留，请在最新版上重新提交`);task.resultVersion=baseVersion+1;await this.publish(task)});

@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
-const mocks=vi.hoisted(()=>({spawn:vi.fn(),execFile:vi.fn(),access:vi.fn(),readdir:vi.fn()}));
+const mocks=vi.hoisted(()=>({spawn:vi.fn(),execFile:vi.fn(),access:vi.fn(),readdir:vi.fn(),writeFile:vi.fn()}));
 vi.mock('node:child_process',()=>({spawn:mocks.spawn,execFile:mocks.execFile}));
-vi.mock('node:fs/promises',()=>({access:mocks.access,mkdir:vi.fn(async()=>{}),readFile:vi.fn(),readdir:mocks.readdir,writeFile:vi.fn()}));
+vi.mock('node:fs/promises',()=>({access:mocks.access,mkdir:vi.fn(async()=>{}),readFile:vi.fn(),readdir:mocks.readdir,writeFile:mocks.writeFile}));
 import { CodexCliRuntime, inspectRuntime, runtimeEnvironment } from '../electron/runtime';
 import type { RuntimeConfig } from '../src/types';
 const config:RuntimeConfig={adapter:'codex-oauth',provider:'',model:'fake',reasoningEffort:'low',maxParallel:1,apiKey:'CONFIG-SECRET'};
 function child(){return Object.assign(new EventEmitter(),{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn()})}
-beforeEach(()=>{mocks.spawn.mockReset();mocks.access.mockReset().mockResolvedValue(undefined);mocks.readdir.mockReset().mockResolvedValue(['1.0'])});
+beforeEach(()=>{mocks.spawn.mockReset();mocks.access.mockReset().mockResolvedValue(undefined);mocks.readdir.mockReset().mockResolvedValue(['1.0']);mocks.writeFile.mockReset().mockResolvedValue(undefined)});
 async function started(){const runtime=new CodexCliRuntime();await runtime.start('test-runtime',config);return runtime}
 async function flushSpawn(){for(let i=0;i<10;i++)await Promise.resolve()}
 describe('Codex 每调用结构化错误',()=>{
@@ -27,6 +27,13 @@ describe('Codex 每调用结构化错误',()=>{
     const process=child();mocks.spawn.mockReturnValue(process);const runtime=new CodexCliRuntime();await runtime.start('test-runtime',{...config,proxyUrl:'socks5://127.0.0.1:7891'});const pending=runtime.promptAndWait('s','prompt');await flushSpawn();
     expect(mocks.spawn.mock.calls.at(-1)?.[2].env).toMatchObject({HTTP_PROXY:'socks5://127.0.0.1:7891',HTTPS_PROXY:'socks5://127.0.0.1:7891',ALL_PROXY:'socks5://127.0.0.1:7891'});
     process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'OK'}})+'\n');process.emit('close',0);expect(await pending).toBe('OK');
+  });
+  it('结构化调用写入 schema 并交给 Codex CLI',async()=>{
+    const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started(),schema={type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false};
+    const pending=runtime.promptAndWait('details-F-003','prompt',60_000,[],schema);await flushSpawn();
+    const args=mocks.spawn.mock.calls.at(-1)?.[1] as string[],schemaIndex=args.indexOf('--output-schema');expect(schemaIndex).toBeGreaterThan(0);expect(args[schemaIndex+1]).toContain('details-F-003.output-schema.json');
+    expect(mocks.writeFile).toHaveBeenCalledWith(expect.stringContaining('details-F-003.output-schema.json'),JSON.stringify(schema),'utf8');
+    process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'{"ok":true}'}})+'\n');process.emit('close',0);expect(JSON.parse(await pending)).toEqual({ok:true});
   });
   it('中间重连error后turn.completed和答案成功不误判失败',async()=>{
     const process=child();mocks.spawn.mockReturnValue(process);const runtime=await started();const pending=runtime.promptAndWait('s','prompt');await flushSpawn();

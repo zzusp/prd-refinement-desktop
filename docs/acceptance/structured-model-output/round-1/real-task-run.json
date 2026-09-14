@@ -1,0 +1,12 @@
+{
+  "taskId": "T-D8D0BF69",
+  "status": "needs-attention",
+  "error": "需要业务确认：平台整理已经完成，阻塞级业务问题需确认后才能交付给开发 Agent。",
+  "pipelineVersion": 21,
+  "progress": 88,
+  "detailedFeatures": 21,
+  "auditSucceeded": 21,
+  "auditFailed": 0,
+  "promptMetrics": 106,
+  "originalFailureNodePassed": "details-F-003-batch0"
+}

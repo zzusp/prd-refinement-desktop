@@ -23,7 +23,7 @@ function runtime(prompts:string[]):AnalysisRuntime{return{start:async()=>{},stop
   throw new Error(`未处理节点：${prompt.slice(0,80)}`);
 }}}
 
-describe('Pipeline 20 调度不变量',()=>{
+describe('Pipeline 21 调度不变量',()=>{
   it('默认并发为五任务、每任务十节点',()=>{expect(schedulerConcurrency({maxParallel:5,maxNodeParallel:10})).toEqual({taskLimit:5,nodeLimit:10,slotLimit:50})});
   it('提示输入裁剪保留业务字段并移除显示元数据',()=>{expect(compactPromptInput({id:'S1',excerpt:'要求',location:'第1段',label:'标题'})).toMatchObject({id:'S1',excerpt:'要求'})});
   it('首次分析说明按原话拆成用户来源且重复恢复不会重复添加',()=>{const value=project();value.analysisInput={text:'本期只做查询；\n同名按完全一致处理。\n是否需要自动合并？',revision:1,submittedAt:'2026-09-13T10:00:00.000Z',operationId:'OP-1',fingerprint:'abcdef1234567890'};attachInitialUserInput(value);attachInitialUserInput(value);const added=value.sourceUnits.filter(unit=>unit.synthetic);expect(added.map(unit=>unit.excerpt)).toEqual(['本期只做查询；','同名按完全一致处理。','是否需要自动合并？']);expect(added.every(unit=>unit.location.startsWith('用户补充 · 本次分析'))).toBe(true)});
@@ -42,10 +42,10 @@ describe('Pipeline 20 调度不变量',()=>{
     await scheduler.retry(created.id);const completed=await terminal(scheduler);expect(completed.status,completed.error).toBe('completed');expect(Object.fromEntries(auditCalls)).toEqual({'F-001':1,'F-002':2});expect(completed.checkpoint?.auditWorkStates?.['F-002']).toMatchObject({state:'succeeded',attempts:2});expect(completed.checkpoint?.executionFailures).toEqual([]);
   });
   it('细化首轮多个结构错误会一次反馈并在第二轮整体纠正',async()=>{
-    const prompts:string[]=[],directory=path.join(root,'detail-correction'),base=runtime(prompts);let detailAttempts=0;
-    const correcting:AnalysisRuntime={...base,promptAndWait:async(id,prompt,options)=>{if(prompt.includes('“逐功能细化”')&&++detailAttempts===1){prompts.push(prompt);return JSON.stringify({requirements:[{id:'LOCAL-R1',title:'需求1',behavior:'按原文执行',conditions:['E1'],constraints:[],explicitAcceptanceEvidenceIds:[],sourceUnitIds:['S1'],state:'draft'}],clarifications:[]})}return base.promptAndWait(id,prompt,options)}};
+    const prompts:string[]=[],directory=path.join(root,'detail-correction'),base=runtime(prompts);let detailAttempts=0,detailSchema:Record<string,unknown>|undefined;
+    const correcting:AnalysisRuntime={...base,promptAndWait:async(id,prompt,options,images,schema)=>{if(prompt.includes('“逐功能细化”')){detailSchema=schema;if(++detailAttempts===1){prompts.push(prompt);return JSON.stringify({requirements:[{id:'LOCAL-R1',title:'需求1',behavior:'按原文执行',conditions:['E1'],constraints:[],explicitAcceptanceEvidenceIds:[],sourceUnitIds:['S1'],state:'draft'}],clarifications:[]})}}return base.promptAndWait(id,prompt,options,images,schema)}};
     const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>correcting);await scheduler.initialize();const created=await scheduler.create(project()),done=await terminal(scheduler);
-    expect(done.status,done.error).toBe('completed');expect(detailAttempts).toBe(2);
+    expect(done.status,done.error).toBe('completed');expect(detailAttempts).toBe(2);expect(detailSchema).toMatchObject({type:'object',required:['requirements','clarifications'],additionalProperties:false});
     const correction=prompts.find(item=>item.includes('请一次修正上述全部问题'))??'';
     expect(correction).toContain('requirements[0].behavior');expect(correction).toContain('requirements[0].conditions[0]');expect(correction).toContain('requirements[0].sourceUnitIds');expect(correction).toContain('{"text":"...","evidenceIds":["E1"]}');
     const persisted=JSON.parse(await readFile(path.join(directory,`${created.id}.json`),'utf8')) as {checkpoint:{validationFailures:Array<{issues?:unknown[]}>}};

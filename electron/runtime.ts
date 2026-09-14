@@ -5,10 +5,11 @@ import { spawn, execFile } from 'node:child_process';
 import type { RuntimeCallMetric, RuntimeConfig, RuntimeStatus } from '../src/types.js';
 
 export interface RuntimeImage { path:string; mimeType:string }
+export type RuntimeOutputSchema = Record<string, unknown>;
 
 export interface AnalysisRuntime {
   start(cwd: string, config: RuntimeConfig): Promise<void>;
-  promptAndWait(sessionId: string, text: string, timeoutMs?: number, images?: RuntimeImage[]): Promise<string>;
+  promptAndWait(sessionId: string, text: string, timeoutMs?: number, images?: RuntimeImage[], outputSchema?:RuntimeOutputSchema): Promise<string>;
   stop(): Promise<void>;
   diagnostics(): string;
   metrics?(): RuntimeCallMetric[];
@@ -79,10 +80,10 @@ function redactRuntimeError(value:string,knownSecret?:string){
 export class CodexCliRuntime implements AnalysisRuntime {
   private children=new Set<ReturnType<typeof spawn>>();private cwd='';private config?:RuntimeConfig;private stderr='';private calls:RuntimeCallMetric[]=[];
   async start(cwd:string,config:RuntimeConfig){if(!await codexLauncher())throw new Error('未找到官方 Codex CLI');this.cwd=path.resolve(cwd);await mkdir(this.cwd,{recursive:true});this.config=config}
-  async promptAndWait(sessionId:string,text:string,timeoutMs=10*60_000,images:RuntimeImage[]=[]){
+  async promptAndWait(sessionId:string,text:string,timeoutMs=10*60_000,images:RuntimeImage[]=[],outputSchema?:RuntimeOutputSchema){
     const launcher=await codexLauncher();if(!launcher||!this.config)throw new Error('Codex CLI Runtime 尚未启动');
     const startedAt=Date.now(),metric:RuntimeCallMetric={sessionId,adapter:'codex-oauth',model:this.config.model,reasoningEffort:this.config.reasoningEffort,startedAt,completedAt:startedAt,durationMs:0};
-    const args=['exec','--json','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--ignore-user-config','--ignore-rules','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','image_generation','--disable','memories','--disable','plugins','--disable','skill_search','--disable','shell_tool','--disable','unified_exec','--disable','workspace_dependencies','--disable','goals','--disable','multi_agent','-C',this.cwd,'-m',this.config.model];if(this.config.reasoningEffort!=='default')args.push('-c',`model_reasoning_effort=${JSON.stringify(this.config.reasoningEffort)}`);for(const image of images)args.push('--image',image.path);args.push('-');
+    const args=['exec','--json','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--ignore-user-config','--ignore-rules','--disable','apps','--disable','browser_use','--disable','computer_use','--disable','image_generation','--disable','memories','--disable','plugins','--disable','skill_search','--disable','shell_tool','--disable','unified_exec','--disable','workspace_dependencies','--disable','goals','--disable','multi_agent','-C',this.cwd,'-m',this.config.model];if(this.config.reasoningEffort!=='default')args.push('-c',`model_reasoning_effort=${JSON.stringify(this.config.reasoningEffort)}`);if(outputSchema){const schemaPath=path.join(this.cwd,`${sessionId.replace(/[^A-Za-z0-9._-]/g,'_')}.output-schema.json`);await writeFile(schemaPath,JSON.stringify(outputSchema),'utf8');args.push('--output-schema',schemaPath)}for(const image of images)args.push('--image',image.path);args.push('-');
     const child=spawn(launcher.bin,args,{cwd:this.cwd,env:runtimeEnvironment(this.config),stdio:['pipe','pipe','pipe'],windowsHide:true});this.children.add(child);child.stdin!.end(text,'utf8');
     let buffer='',stderrBuffer='',answer='',settled=false,turnFailed=false,turnCompleted=false;const failures:string[]=[];
     return new Promise<string>((resolve,reject)=>{

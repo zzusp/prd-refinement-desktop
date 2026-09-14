@@ -12,6 +12,7 @@ import { buildSourceUnits, enrichSourceContext, sourceCoverage } from './source-
 import { DetailEvidenceValidationError, evidencePromptInput, materializeDetailEvidenceSelections, materializeEvidenceSelections, type DetailEvidenceIssue, type SourceEvidence } from './source-evidence.js';
 import {checksPass, closeIssue, contentFingerprint, projectInputHash, registerAuditIssues, requiredChecks} from './task-execution-state.js';
 import {attemptTimeoutMs,budgetClassFor,measurePrompt} from './prompt-budget.js';
+import {detailOutputSchema, type JsonSchema} from './model-output-schemas.js';
 
 class CandidateClassificationError extends Error {
   constructor(readonly issues: ReturnType<typeof acceptCandidateClassificationIssues>) { super('统一发现候选分类错误，需要定点重分类'); }
@@ -42,7 +43,7 @@ const repairReviewSchema = `{"originalIssueResults":[{"issueId":"输入问题ID"
 const fastNodes = new Set<ModelNodeId>(['inputInterpretation', 'featureCandidates', 'detailsFast']);
 const sourceClassificationContract = '统一来源分类契约：仅数量统计或章节索引、未表达具体业务行为的摘要归为 context，不需要独立功能，检查不得要求为其创建功能，统一不得因其未独立成项重复反馈。摘要若包含正文未展开的具体业务要求，必须保留并关联实际功能；不能因位于摘要就丢弃。文档记法和纯表头归为 context；标题或摘要明确的新增模块、字段重命名等业务要求必须保留。';
 const nodeStep: Record<ModelNodeId, number> = { imageReading: 0, inputInterpretation:0, featureCandidates: 1, featureCandidateRepair: 1, featureGlobal: 2, detailsFast: 3, details: 3, audit: 4, repair: 5 };
-export const CURRENT_PIPELINE_VERSION = 20;
+export const CURRENT_PIPELINE_VERSION = 21;
 
 function parseObject(value: string) {
   return JSON.parse(value.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()) as Record<string, unknown>;
@@ -441,7 +442,7 @@ export class AnalysisTaskScheduler {
       if (!runtime) { const effective = nodeConfig(config, node); runtime = (async () => { const r = this.runtimeFactory(effective); runtimes.push(r); await r.start(path.join(workspace, `runtime-${node}`), effective); return r; })(); cache.set(node, runtime); }
       return runtime;
     };
-    const call = async <T>(node: ModelNodeId, purpose: string, title: string, instruction: string, input: unknown, accept: (v: Record<string, unknown>) => T, images: RuntimeImage[] = [],preparedEvidence=false,materialize:(value:Record<string,unknown>,catalog:SourceEvidence[])=>Record<string,unknown>=materializeEvidenceSelections): Promise<T> => {
+    const call = async <T>(node: ModelNodeId, purpose: string, title: string, instruction: string, input: unknown, accept: (v: Record<string, unknown>) => T, images: RuntimeImage[] = [],preparedEvidence=false,materialize:(value:Record<string,unknown>,catalog:SourceEvidence[])=>Record<string,unknown>=materializeEvidenceSelections,outputSchema?:JsonSchema): Promise<T> => {
       const queuedAt=Date.now();this.assert(task, attempt);await acquireLocal();let global=false;
       try{await this.acquire();global=true}catch(error){releaseLocal();throw error}
       const index = nodeStep[node], step = task.steps[index]; let entered = false;
@@ -458,7 +459,7 @@ export class AnalysisTaskScheduler {
           const directory=path.join(workspace,'diagnostics');await mkdir(directory,{recursive:true});const responsePath=path.join(directory,`${sessionId}-try${validationAttempt}.json`);
           await writeFile(responsePath,JSON.stringify({sessionId,node,purpose,message,issues,response,requestHash:createHash('sha256').update(JSON.stringify(evidence.input)).digest('hex'),at:Date.now()},null,2),'utf8');
           (cp.validationFailures??=[]).push({sessionId,node,purpose,message,issues,responsePath,at:Date.now()});await checkpoint();
-        }); } catch(error) { if(error instanceof ModelOutputValidationError){error.stepIndex=index;error.purpose=purpose;error.title=title}throw error }
+        },outputSchema); } catch(error) { if(error instanceof ModelOutputValidationError){error.stepIndex=index;error.purpose=purpose;error.title=title}throw error }
         this.assert(task, attempt); return result;
       } finally {
         if (entered && --busy[index] === 0 && task.attempt === attempt) {
@@ -657,7 +658,7 @@ export class AnalysisTaskScheduler {
           const applicableConstraints=task.project.features.filter(item=>item.kind==='constraint'&&item.appliesToFeatureIds?.includes(feature.id));
           const units=sourceUnits([...feature.sourceUnitIds,...applicableConstraints.flatMap(item=>item.sourceUnitIds)]),instruction=`忠实细化当前功能及适用约束，只整理原文明示内容。一个条目表达完整业务要求；同对象字段属性可合并，能分别漏做的行为才拆分。不得输出功能概述，不得补充常识、实现方案或测试。只有缺少决定业务行为所必需的信息或原文冲突时才记录问题。${clarificationContract} 每个字段的 evidenceBindings 只能选择直接支持该字段的证据。输出 ${detailSchema}`;
           const featureInput={id:feature.id,name:feature.name,kind:feature.kind},constraintInputs=applicableConstraints.map(item=>({id:item.id,name:item.name,kind:item.kind}));
-           const partials=await mapPool(batches(units,12),pool,async(batch,batchIndex)=>call(detailIsComplex(feature,units)?'details':'detailsFast',`details-${feature.id}-batch${batchIndex}`,'逐功能细化',instruction,{feature:featureInput,applicableConstraints:constraintInputs,sourceUnits:batch},value=>acceptDirectDetails(value.requirements,value.clarifications,batch,true),[],false,materializeDetailEvidenceSelections));
+           const partials=await mapPool(batches(units,12),pool,async(batch,batchIndex)=>call(detailIsComplex(feature,units)?'details':'detailsFast',`details-${feature.id}-batch${batchIndex}`,'逐功能细化',instruction,{feature:featureInput,applicableConstraints:constraintInputs,sourceUnits:batch},value=>acceptDirectDetails(value.requirements,value.clarifications,batch,true),[],false,materializeDetailEvidenceSelections,detailOutputSchema));
           results[feature.id]=combineDetailBatches(partials);cp.detailedFeatureIds=Object.keys(results);task.steps[3].note=`已细化 ${cp.detailedFeatureIds.length}/${task.project.features.length} 个功能`;await checkpoint();
         });
         const materialized=new Set(cp.materializedFeatureIds??[]);this.assert(task,attempt);
@@ -740,17 +741,17 @@ export class AnalysisTaskScheduler {
       await this.publish(task);
     } finally { await Promise.allSettled(runtimes.map(r => r.stop())); }
   }
-  private async ask<T>(runtime: AnalysisRuntime, id: string, request: string, accept: (v: Record<string, unknown>) => T, images: RuntimeImage[], assert: () => void, timeoutMs:()=>number, onAttempt:(attempt:number,request:string)=>Promise<void>, onInvalid?:(attempt:number,response:string,message:string,issues?:DetailEvidenceIssue[])=>Promise<void>) {
+  private async ask<T>(runtime: AnalysisRuntime, id: string, request: string, accept: (v: Record<string, unknown>) => T, images: RuntimeImage[], assert: () => void, timeoutMs:()=>number, onAttempt:(attempt:number,request:string)=>Promise<void>, onInvalid?:(attempt:number,response:string,message:string,issues?:DetailEvidenceIssue[])=>Promise<void>,outputSchema?:JsonSchema) {
     let current = request, last: unknown;
     for (let attempt = 1; attempt <= 2; attempt++) {
-      assert();await onAttempt(attempt,current);assert();const response = await this.promptWithTransientRetry(runtime,`${id}-try${attempt}`,current,timeoutMs(),images,assert); assert();
+      assert();await onAttempt(attempt,current);assert();const response = await this.promptWithTransientRetry(runtime,`${id}-try${attempt}`,current,timeoutMs(),images,assert,outputSchema); assert();
       try { return accept(parseObject(response)); } catch (error) { last = error; const message=error instanceof Error?error.message:String(error),issues=error instanceof DetailEvidenceValidationError?error.issues:undefined,extractive=message.includes('.explicitAcceptanceConditions')?'\n专项修正规则：该字段中的每一项都必须由 explicitAcceptanceEvidenceIds 选择 evidenceCatalog 中的原文证据，不得重新抄写。':issues?'\n专项修正规则：behavior、每项 condition 和 constraint 必须分别返回 {"text":"...","evidenceIds":["E1"]}；不要输出 evidenceBindings、sourceUnitIds 或 state。':'';await onInvalid?.(attempt,response,message,issues); current = `上次响应未通过结构/引用校验：\n${message}${extractive}\n请一次修正上述全部问题。只能选择原请求中 evidenceCatalog 已提供的证据编号；不得输出 quote、字符位置或自造证据。返回修正后的完整节点 JSON。以下为原始节点请求：\n${request}`; }
     }
     throw new ModelOutputValidationError(last instanceof Error?last.message:String(last),last);
   }
-  private async promptWithTransientRetry(runtime:AnalysisRuntime,id:string,request:string,timeoutMs:number,images:RuntimeImage[],assert:()=>void){
+  private async promptWithTransientRetry(runtime:AnalysisRuntime,id:string,request:string,timeoutMs:number,images:RuntimeImage[],assert:()=>void,outputSchema?:JsonSchema){
     const waits=[2_000,5_000,10_000];
-    for(let attempt=0;;attempt++)try{return await runtime.promptAndWait(attempt?`${id}-runtime${attempt+1}`:id,request,timeoutMs,images)}catch(error){
+    for(let attempt=0;;attempt++)try{return await runtime.promptAndWait(attempt?`${id}-runtime${attempt+1}`:id,request,timeoutMs,images,outputSchema)}catch(error){
       const message=error instanceof Error?error.message:String(error);
       if(attempt>=waits.length||!/(?:selected model is at capacity|rate limit|too many requests|temporarily unavailable)/i.test(message))throw error;
       await new Promise(resolve=>setTimeout(resolve,waits[attempt]));assert();

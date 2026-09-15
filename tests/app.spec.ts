@@ -88,7 +88,7 @@ describe('需求细化数据契约', () => {
   it('结果页使用一个任务级自然语言调整入口',()=>{
     const task={id:'T-1',resultVersion:3,status:'completed',progress:100,steps:[],adjustment:{feedback:'统一含税',results:[{operationId:'OP-1',status:'applied',featureIds:['F-1'],clarificationIds:[],detail:'退款金额已统一为含税口径。'},{operationId:'OP-2',status:'needs-confirmation',featureIds:[],clarificationIds:[],detail:'仍需确认支付超时范围。'}]},project:{name:'订单',features:[],requirements:[],clarifications:[],sourceUnits:[]}} as unknown as AnalysisTask;
     const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
-    expect(html).toContain('描述你希望怎么调整');
+    expect(html).toContain('调整本版结果');
     expect(html).toContain('可以调整模块组织、需求颗粒度或指出遗漏');
     expect(html).toContain('按说明调整');
     expect(html).toContain('已落实 1 项，1 项仍需处理');
@@ -161,7 +161,8 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('标记本期不做');
     expect(html).toContain('恢复本期');
     expect(html).toContain('取消选择');
-    expect(html).toContain('描述你希望怎么调整');
+    expect(html).toContain('调整结果');
+    expect(html).not.toContain('调整本版结果');
     expect(html).not.toContain('概览');
   });
 

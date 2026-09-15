@@ -860,7 +860,8 @@ function TaskPage({
     text: string;
   }>();
   const [deleting, setDeleting] = useState(false),
-    [managing, setManaging] = useState(false);
+    [managing, setManaging] = useState(false),
+    [adjusting, setAdjusting] = useState(false);
   const [failureAction, setFailureAction] = useState<"retry" | "restart">();
   const rootKey = taskRootId(task);
   const inScope = task.project.requirements.filter(
@@ -880,6 +881,7 @@ function TaskPage({
     setFeatureFilter(undefined);
     setDetail(undefined);
     setFailureAction(undefined);
+    setAdjusting(false);
   }, [rootKey]);
   useEffect(() => {
     if (task.status !== "failed") setFailureAction(undefined);
@@ -1029,6 +1031,17 @@ function TaskPage({
               {artifactAction === "generate" ? "正在重新生成" : "重新生成产物"}
             </button>
           ) : null}
+          {canAdjust && (
+            <button
+              className="secondary"
+              aria-expanded={adjusting}
+              aria-controls="task-adjustment-panel"
+              onClick={() => setAdjusting((value) => !value)}
+            >
+              <ListChecks />
+              {adjusting ? "收起调整" : "调整结果"}
+            </button>
+          )}
           <details className="more-menu">
             <summary aria-label="更多任务操作">
               <MoreHorizontal />
@@ -1083,6 +1096,11 @@ function TaskPage({
           {actionMessage.text}
         </p>
       )}
+      {canAdjust && adjusting && (
+        <div id="task-adjustment-panel">
+          <TaskFeedback task={task} onAdjust={onAdjust} onClose={() => setAdjusting(false)} />
+        </div>
+      )}
       <Results
         task={task}
         project={task.project}
@@ -1097,7 +1115,6 @@ function TaskPage({
         now={now}
       />
       {task.project.analysisInput?.text&&<details className="task-input-summary"><summary>本次分析输入 <span>用户补充 · {task.project.analysisInput.text.length.toLocaleString('zh-CN')} 字</span></summary><div><small>提交于 {new Date(task.project.analysisInput.submittedAt).toLocaleString('zh-CN')} · 已随第 {task.project.analysisInput.revision} 版输入固定</small><pre>{task.project.analysisInput.text}</pre>{task.project.analysisInputApplications?.length?<section className="input-application-list"><h4>平台如何使用这些内容</h4>{task.project.analysisInputApplications.map(item=><article key={item.sourceUnitId}><strong>{item.kind==='business-fact'?'业务补充':item.kind==='scope-decision'?'本期范围':item.kind==='organization'?'整理要求':item.kind==='question'?'待回答问题':'替换口径'}</strong><span>{item.summary}</span><em>{item.status==='pending'?'仍待确认':item.affectedFeatureIds.length?`已应用到 ${item.affectedFeatureIds.length} 个功能`:'已记录'}</em></article>)}</section>:null}</div></details>}
-      {canAdjust && <TaskFeedback task={task} onAdjust={onAdjust} />}{" "}
       {detail && (
         <Drawer
           project={task.project}
@@ -1289,16 +1306,18 @@ function feedbackStorage() {
 export function TaskFeedback({
   task,
   onAdjust,
+  onClose,
 }: {
   task: AnalysisTask;
   onAdjust: (request: AdjustmentRequest) => Promise<void>;
+  onClose?: () => void;
 }) {
   const storageKey = `prd-feedback-draft:${taskRootId(task)}`;
   const [draft, setDraft] = useState(() =>
     loadFeedbackDraft(feedbackStorage(), storageKey),
   );
-  const [expanded, setExpanded] = useState(false),
-    [busy, setBusy] = useState(false),
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [busy, setBusy] = useState(false),
     [message, setMessage] = useState<{
       kind: "error" | "success";
       text: string;
@@ -1313,6 +1332,9 @@ export function TaskFeedback({
   useEffect(() => {
     saveFeedbackDraft(feedbackStorage(), storageKey, draft);
   }, [storageKey, draft]);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -1350,7 +1372,7 @@ export function TaskFeedback({
   }
   return (
     <section
-      className={`task-feedback ${expanded ? "expanded" : ""}`}
+      className="task-feedback expanded"
       aria-labelledby="task-feedback-title"
     >
       {results.length > 0 && (
@@ -1383,27 +1405,21 @@ export function TaskFeedback({
       <form noValidate onSubmit={submit}>
         <div className="task-feedback-heading">
           <div>
-            <h2 id="task-feedback-title">描述你希望怎么调整</h2>
+            <h2 id="task-feedback-title">调整本版结果</h2>
             <p>
               可以调整模块组织、需求颗粒度或指出遗漏。清单中的功能和需求必须存在于 PRD，并保留原意。
             </p>
           </div>
-          <button
-            className="text-action"
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? "收起输入区" : "展开输入区"}
-          </button>
+          {onClose && <button className="text-action" type="button" onClick={onClose}>收起</button>}
         </div>
         <label htmlFor="task-feedback-input" className="sr-only">
           调整说明
         </label>
         <textarea
+          ref={inputRef}
           id="task-feedback-input"
           className="resize-none"
-          rows={expanded ? 12 : 3}
+          rows={6}
           value={draft}
           disabled={busy}
           aria-invalid={message?.kind === "error"}

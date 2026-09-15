@@ -2143,7 +2143,6 @@ function RequirementList({
             <span>编号</span>
             <span>需求明细</span>
             <span>原文</span>
-            <span>检查状态</span>
             <span>本期范围</span>
           </div>
         </div>
@@ -2178,13 +2177,6 @@ function RequirementList({
                   <small>{p.features.find(feature => feature.id === item.featureId) ? featureTitle(p, p.features.find(feature => feature.id === item.featureId)!) : '模块待定位'}</small>
                 </span>
                 <b>{requirementSourceRefs(item).length}</b>
-                <b>
-                  {item.state === "needs-clarification"
-                    ? "待核查"
-                    : item.state === "reviewed"
-                      ? "检查通过"
-                      : "尚未检查"}
-                </b>
                 <em
                   className={`scope-badge ${item.deliveryScope === "excluded" ? "excluded" : "current"}`}
                 >
@@ -2337,13 +2329,6 @@ function Drawer({
         <div>
           <code>{item.id}</code>
           <h2>{requirementText(item)}</h2>
-          <small>
-            {item.state === "needs-clarification"
-              ? "待核查"
-              : item.state === "reviewed"
-                ? "检查通过"
-                : "尚未检查"}
-          </small>
         </div>
         <button onClick={onClose} aria-label="关闭">
           <X />

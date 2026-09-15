@@ -187,13 +187,15 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('R-OLD');
     expect(html).toContain('requirement-columns');
     expect(html).not.toContain('需求内容待读取');
+    expect(html).not.toContain('检查状态');
+    expect(html).not.toContain('检查通过');
   });
 });
 it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{
  const item={id:'R-1',featureId:'F-1',text:'允许查询订单。',sourceRefs:[{sourceUnitId:'S-1'}],state:'reviewed'} as const;
  const p={features:[{id:'F-1',name:'订单',requirementIds:['R-1']}],requirements:[item],sourceUnits:[{id:'S-1',excerpt:'用户登录后，可以按订单编号查询。',location:'第 10 行',logicalPath:'prd.md'}]} as any;
  const drawer=renderToStaticMarkup(React.createElement(Drawer,{project:p,item:item as any,onClose:()=>undefined}));
- expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');
+ expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');expect(drawer).not.toContain('检查通过');
  const list=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T',status:'completed'} as any,p,onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
  expect(list).toContain('订单');expect(list).toContain('允许查询订单。');expect(list).toContain('原文');
 });

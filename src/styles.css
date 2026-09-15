@@ -73,9 +73,9 @@ textarea:focus-visible{outline:2px solid #65a8ce;outline-offset:2px}
 /* 结果表头与数据行共用完全相同的嵌套列轨道。 */
 .features.scope-table .thead,.features.scope-table .feature-row{min-width:930px;grid-template-columns:48px minmax(0,1fr);padding:0}
 .features.scope-table .feature-open,.thead-columns.feature-columns{grid-column:2;grid-template-columns:minmax(260px,1.2fr) minmax(240px,1fr) 70px 120px}
-.requirements.scope-table .thead,.requirements.scope-table .requirement-row{min-width:1080px;grid-template-columns:48px minmax(0,1fr);padding:0}
+.requirements.scope-table .thead,.requirements.scope-table .requirement-row{min-width:960px;grid-template-columns:48px minmax(0,1fr);padding:0}
 .thead-columns{display:grid;gap:12px;align-items:center;align-self:stretch;padding:0 14px}
-.thead-columns.requirement-columns,.requirement-open{grid-column:2;grid-template-columns:75px minmax(360px,1fr) 65px 100px 100px}
+.thead-columns.requirement-columns,.requirement-open{grid-column:2;grid-template-columns:75px minmax(360px,1fr) 65px 100px}
 .row-select input{margin:0}
 
 body{min-width:0}

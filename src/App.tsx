@@ -2128,12 +2128,18 @@ function RequirementList({
     <Collection
       title={feature ? `需求明细 · ${featureTitle(p, feature)}` : "全部需求"}
       count={rows.length}
-      hideHeader={!feature}
+      hideHeader
     >
       {feature && (
-        <button className="text-action clear-feature" onClick={onClearFeature}>
-          查看全部需求
-        </button>
+        <div className="active-feature-filter" role="status">
+          <span>当前功能</span>
+          <strong>{featureTitle(p, feature)}</strong>
+          <b>{rows.length} 条需求</b>
+          <button className="text-action" onClick={onClearFeature}>
+            <X />
+            清除筛选
+          </button>
+        </div>
       )}
       <ListControls
         q={q}

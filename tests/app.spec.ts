@@ -205,6 +205,14 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('检查状态');
     expect(html).not.toContain('检查通过');
     expect(html).not.toContain('class="collection-head"');
+    const filtered=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T-OLD',resultVersion:1,project} as AnalysisTask,p:project,featureId:'F-1',onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
+    expect(filtered).toContain('class="active-feature-filter"');
+    expect(filtered).toContain('当前功能');
+    expect(filtered).toContain('审核列表');
+    expect(filtered).toContain('1 条需求');
+    expect(filtered).toContain('清除筛选');
+    expect(filtered).not.toContain('查看全部需求');
+    expect(filtered).not.toContain('class="collection-head"');
   });
 });
 it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{

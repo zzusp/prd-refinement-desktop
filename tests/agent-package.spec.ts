@@ -58,7 +58,7 @@ describe('Agent 交付包',()=>{
     const item={id:'Q-1',question:'退款口径？',reason:'原文未定',affectedIds:['R-001'],sourceRefs:[{sourceUnitId:'S-1'}],state:'open' as const,resolutionProposal:{recommendation:'含税',rationale:'账务一致',impact:'包含税额',confirmation:'确认口径',alternatives:['不含税'],sourceRefs:[{sourceUnitId:'S-1'}]},userDecision:{text:'不含税',confirmedAt:'2026-09-14',status:'pending-prd-sync' as const,operationId:'OP-1'}};
     project.clarifications=[item];const result=await writeAgentPackage(project,task,root,'decided');
     expect(await readdir(result.directory)).not.toContain('pending.json');
-    const exported=[await readFile(path.join(result.directory,'README.md'),'utf8'),await readFile(path.join(result.directory,'implementation.md'),'utf8'),JSON.stringify(result.manifest)].join('\n');
+    const exported=[await readFile(path.join(result.directory,'README.md'),'utf8'),await readFile(path.join(result.directory,'agent-checklist.md'),'utf8'),JSON.stringify(result.manifest)].join('\n');
     for(const legacy of ['clarifications','resolutionProposal','userDecision','pendingItemCount','unmetDependencyCount','blockedFeatureIds','退款口径？','不含税'])expect(exported).not.toContain(legacy);
     expect(project.clarifications).toEqual([item]);expect(project.requirements[0].text).toBe('用户提交订单');
   });
@@ -73,18 +73,18 @@ describe('Agent 交付包',()=>{
     expect(result.manifest.qualityState).toBe('blocked');
     expect(await readdir(result.directory)).not.toContain('pending.json');
     expect(project.audit.issues.map(item=>item.id)).toContain('A-1');
-    expect(await readFile(path.join(result.directory,'implementation.md'),'utf8')).toContain('R-001');
+    expect(await readFile(path.join(result.directory,'agent-checklist.md'),'utf8')).toContain('R-001');
     expect(await readFile(path.join(result.directory,'README.md'),'utf8')).not.toContain('平台');
   });
   it('从同一快照生成、回读并原子发布完整需求包',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=await fixture(root);const assetPath=path.join(root,'原始图片.png'),asset=Buffer.from('fixture-image');await writeFile(assetPath,asset);project.sourceUnits[0].asset={path:assetPath,mimeType:'image/png',sha256:hash(asset),readStatus:'read'};const result=await writeAgentPackage(project,task,root,'delivery-1');
     expect(path.basename(result.directory)).toBe('delivery-1');expect(result.manifest.qualityState).toBe('ready');
-    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','implementation.md','manifest.json','sources']);
-    expect(result.manifest.schemaVersion).toBe(6);
+    const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','agent-checklist.md','manifest.json','sources']);
+    expect(result.manifest.schemaVersion).toBe(7);
     expect(await readdir(path.join(result.directory,'sources'))).toEqual(['files']);
-    const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('implementation.md');expect(readme).toContain('先阅读');
-    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('agent-checklist.md');expect(readme).toContain('先阅读');
+    const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('## F-001 提交订单');
     expect(implementation).toContain('- [ ] R-001：用户提交订单');
     expect(implementation).toContain('- [ ] R-900：操作前校验登录状态');
@@ -101,7 +101,7 @@ describe('Agent 交付包',()=>{
     legacy.title='用户填写“名称,规格”后提交\n系统保留原始换行';legacy.sourceUnitIds=['S-1'];
     delete legacy.text;delete legacy.featureId;delete legacy.sourceRefs;
     const result=await writeAgentPackage(project,task,root,'markdown-roundtrip');
-    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('- [ ] R-001：用户填写“名称,规格”后提交<br>系统保留原始换行');
     expect(implementation.match(/^- \[ \] R-001：/gm)).toHaveLength(1);
   });
@@ -118,7 +118,7 @@ describe('Agent 交付包',()=>{
     expect(result.manifest.selectedFeatureIds).toEqual(['F-001','F-002']);
     expect(await readdir(result.directory)).not.toContain('pending.json');
     expect(await readdir(result.directory)).not.toContain('features');
-    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation.match(/^- \[ \] /gm)).toHaveLength(3);
     expect(implementation).toContain('## F-002 取消订单');
     expect(implementation).not.toContain('R-002：');
@@ -133,7 +133,7 @@ describe('Agent 交付包',()=>{
     project.relations=[{id:'REL-1',sourceRequirementId:'R-001',targetRequirementId:'R-002',kind:'depends-on',sourceRefs:[{sourceUnitId:'S-3'}]}];
     const result=await writeAgentPackage(project,task,root,'dependency', {selectedFeatureIds:['F-001','F-002']});
     expect(result.manifest.selectedFeatureIds).toEqual(['F-001']);
-    const implementation=await readFile(path.join(result.directory,'implementation.md'),'utf8');
+    const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('R-001');
     expect(implementation).not.toContain('R-002');
     expect(await readdir(result.directory)).not.toContain('pending.json');
@@ -149,9 +149,9 @@ describe('Agent 交付包',()=>{
   it('目标目录已存在时不覆盖旧包，并清理临时目录',async()=>{
     const root=await createTestWorkspace('prd-agent-package');roots.push(root);
     const {project,task}=await fixture(root);await writeAgentPackage(project,task,root,'stable');
-    const original=await readFile(path.join(root,'stable','implementation.md'),'utf8');
+    const original=await readFile(path.join(root,'stable','agent-checklist.md'),'utf8');
     await expect(writeAgentPackage(project,task,root,'stable')).rejects.toThrow();
-    expect(await readFile(path.join(root,'stable','implementation.md'),'utf8')).toBe(original);
+    expect(await readFile(path.join(root,'stable','agent-checklist.md'),'utf8')).toBe(original);
     expect((await readdir(root)).filter(name=>name.endsWith('.tmp'))).toEqual([]);
   });
 });

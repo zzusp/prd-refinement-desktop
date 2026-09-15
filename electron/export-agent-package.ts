@@ -8,10 +8,10 @@ import { projectInputHash } from './task-execution-state.js';
 
 type DeliveryState = DeliveryAssessment['state'];
 type ExtendedTask = AnalysisTask & { runId?:string };
-const agentPackageSchemaVersion = 6 as const;
+const agentPackageSchemaVersion = 7 as const;
 
 export interface AgentPackageManifest {
-  schemaVersion: 6;
+  schemaVersion: 7;
   deliveryId: string;
   taskId: string;
   runId?: string;
@@ -106,10 +106,10 @@ function implementationMarkdown(project:PrdProject) {
 }
 
 async function verifyPackage(directory:string,manifest:AgentPackageManifest,expectedIds:string[],expectedImplementation:string) {
-  const actualImplementation=await readFile(path.join(directory,'implementation.md'),'utf8');
-  if(actualImplementation!==expectedImplementation)throw new Error('implementation.md 回读内容不一致');
+  const actualImplementation=await readFile(path.join(directory,'agent-checklist.md'),'utf8');
+  if(actualImplementation!==expectedImplementation)throw new Error('agent-checklist.md 回读内容不一致');
   const ids=[...actualImplementation.matchAll(/^- \[ \] ([A-Za-z0-9._-]+)：/gm)].map(match=>match[1]).sort();
-  if(JSON.stringify(ids)!==JSON.stringify([...expectedIds].sort()))throw new Error('implementation.md 回读需求不一致');
+  if(JSON.stringify(ids)!==JSON.stringify([...expectedIds].sort()))throw new Error('agent-checklist.md 回读需求不一致');
   for(const file of manifest.files){const full=path.join(directory,...file.path.split('/'));const data=await readFile(full);if(data.length!==file.size||sha256(data)!==file.sha256)throw new Error(`文件回读校验失败：${file.path}`)}
 }
 async function relativeFiles(root:string,current=root):Promise<string[]>{const out:string[]=[];for(const entry of await readdir(current,{withFileTypes:true})){const full=path.join(current,entry.name);if(entry.isSymbolicLink())throw new Error('原始资料不允许符号链接');if(entry.isDirectory())out.push(...await relativeFiles(root,full));else if(entry.isFile())out.push(path.relative(root,full).split(path.sep).join('/'))}return out}
@@ -135,13 +135,13 @@ export async function writeAgentPackage(project:PrdProject,task:AnalysisTask,out
   try {
     const implementation=implementationMarkdown(extendedProject);
     const resultHash=sha256(implementation);
-    await writeFile(path.join(temporaryDirectory,'implementation.md'),implementation,'utf8');
+    await writeFile(path.join(temporaryDirectory,'agent-checklist.md'),implementation,'utf8');
     await writeFile(path.join(temporaryDirectory,'README.md'),[
       `# ${project.name} 实施检查包`,'',
       '1. 先阅读 `sources/files/` 中的原始 PRD 与相关资料。',
-      '2. 结合目标代码仓库逐项实现 `implementation.md` 中的需求。',
+      '2. 结合目标代码仓库逐项实现 `agent-checklist.md` 中的需求。',
       '3. 每完成一项，将对应的 `- [ ]` 改为 `- [x]`。','',
-      '> `implementation.md` 只用于查漏，不能替代原始 PRD；勾选也不等于业务验收通过。',''
+      '> `agent-checklist.md` 只用于查漏，不能替代原始 PRD；勾选也不等于业务验收通过。',''
     ].join('\n'),'utf8');
     const sourceRoot=path.join(temporaryDirectory,'sources');await mkdir(sourceRoot,{recursive:true});
     if(!project.inputSnapshotPath)throw new Error('缺少冻结原始资料，不能导出交付包');

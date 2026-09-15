@@ -88,7 +88,7 @@ describe('Agent 交付包',()=>{
     expect(implementation).toContain('## F-001 提交订单');
     expect(implementation).toContain('- [ ] R-001：用户提交订单');
     expect(implementation).toContain('- [ ] R-900：操作前校验登录状态');
-    expect(implementation).toContain('主 PRD：[prd.md](sources/files/prd.md)');
+    expect(implementation).toContain('主 PRD：[prd.md](<sources/files/prd.md>)');
     expect(implementation).toContain('  - 原文：主 PRD · 第 1 段');
     expect(implementation.match(/^- \[ \] R-/gm)).toHaveLength(2);
     expect(await readFile(path.join(result.directory,'sources','files','prd.md'),'utf8')).toBe(project.rawText);
@@ -105,6 +105,20 @@ describe('Agent 交付包',()=>{
     const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('- [ ] R-001：用户填写“名称,规格”后提交<br>系统保留原始换行');
     expect(implementation.match(/^- \[ \] R-001：/gm)).toHaveLength(1);
+  });
+
+  it('Markdown 原文链接保留中文和空格，不输出 URL 转码文件名',async()=>{
+    const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
+    const logical='PRD-编辑器 审核任务.html';
+    await writeFile(path.join(project.inputSnapshotPath!,'input',logical),project.rawText);
+    await rm(path.join(project.inputSnapshotPath!,'input','prd.md'));
+    project.sourceName=logical;
+    for(const unit of project.sourceUnits)unit.logicalPath=logical;
+    const result=await writeAgentPackage(project,task,root,'unicode-link');
+    const checklist=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
+    expect(checklist).toContain(`主 PRD：[${logical}](<sources/files/${logical}>)`);
+    expect(checklist).not.toContain('%E7%BC%96');
+    expect(await readFile(path.join(result.directory,'sources','files',logical),'utf8')).toBe(project.rawText);
   });
 
   it('模块共同来源只显示一次，特殊条目保留自己的完整来源',async()=>{

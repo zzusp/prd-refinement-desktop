@@ -86,7 +86,7 @@ function snapshot(project:PrdProject,task:ExtendedTask,assessment:DeliveryAssess
 
 const checklistText = (value:string) => value.replace(/\r?\n/g,'<br>').trim();
 const markdownLabel = (value:string) => value.replace(/([\\[\]])/g,'\\$1');
-const markdownPath = (value:string) => value.split('/').map(encodeURIComponent).join('/');
+const markdownPath = (value:string) => `<${value.replaceAll('<','%3C').replaceAll('>','%3E')}>`;
 interface ChecklistSource { key:string; text:string }
 const sourceSetKey = (items:ChecklistSource[]) => JSON.stringify(items.map(item=>item.key).sort());
 function checklistSources(project:PrdProject) {

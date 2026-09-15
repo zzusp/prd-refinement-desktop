@@ -1,6 +1,6 @@
 {
   "name": "prd-refinement-desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "main": "docs/tmp/desktop-build/current/dist-electron/electron/main.js",

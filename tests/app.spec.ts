@@ -154,8 +154,8 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('全部需求');
     expect(html).not.toContain('待处理事项');
     expect(html).toContain('执行记录');
-    expect(html).toContain('生成交付包');
-    expect(html).toContain('打开产物');
+    expect(html).not.toContain('生成交付包');
+    expect(html).not.toContain('重新生成产物');
     expect(html).toContain('全选本页功能');
     expect(html).toContain('选择当前筛选全部（1）');
     expect(html).toContain('标记本期不做');

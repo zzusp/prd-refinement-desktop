@@ -219,6 +219,21 @@ describe("任务生命周期、本期范围与产物记录", () => {
     ).rejects.toThrow("最新版");
   });
 
+  it("本期范围生成新版本时同步生成对应交付包", async () => {
+    const root = await createTestWorkspace("prd-scope-package"); roots.push(root);
+    const snapshot = path.join(root, "input-snapshots", "SCOPE");
+    await mkdir(path.join(snapshot, "input"), { recursive: true });
+    await writeFile(path.join(snapshot, "input", "prd.md"), "提交订单");
+    const base = task("T-1", 1, undefined, snapshot);
+    const scheduler = new AnalysisTaskScheduler(root, async () => config, () => {}, () => { throw new Error("测试不启动模型"); });
+    await writeFile(path.join(root, `${base.id}.json`), JSON.stringify(base), "utf8");
+    await scheduler.initialize();
+    const changed = await scheduler.updateDeliveryScope({operationId:"SCOPE-PACKAGE",baseTaskId:"T-1",baseVersion:1,scope:"excluded",targets:[{kind:"requirement",id:"R2"}]});
+    expect(changed.artifacts).toHaveLength(1);
+    expect(changed.artifacts?.[0].resultVersion).toBe(2);
+    expect(await readFile(path.join(changed.artifacts![0].path,"agent-checklist.md"),"utf8")).toContain("R1");
+  });
+
   it("旧任务只有真实完成结果才补版本，产物目录缺失会如实返回 exists=false", async () => {
     const unfinished = {
         ...task("T-U"),

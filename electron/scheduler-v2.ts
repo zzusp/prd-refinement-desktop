@@ -320,6 +320,12 @@ export class AnalysisTaskScheduler {
       for(const check of Object.values(checks)){const old=previous?.[check.id];if(old)check.status=old.status;check.issueIds=old?.issueIds??[]}
       project.delivery=assessDelivery(project,checks,proofVersion);
       const task:AnalysisTask={...structuredClone(base),id,operationId,rootTaskId:root,parentTaskId:base.id,baseResultVersion:base.resultVersion,resultVersion,project,scopeChange:{operationId,scope:request.scope,targets:structuredClone(request.targets),changedRequirementIds:[...changed],changedAt:now},artifacts:[],createdAt:now,requestedAt:now,startedAt:now,completedAt:now,checkpoint:{...structuredClone(base.checkpoint),pipelineVersion:CURRENT_PIPELINE_VERSION,resultVersion:proofVersion,checks,verificationCompletedVersion:proofVersion,verificationDependencyHash:contentFingerprint(project),detailedFeatureIds:base.checkpoint?.detailedFeatureIds??[],auditIssues:base.checkpoint?.auditIssues??[],validationFailures:base.checkpoint?.validationFailures??[]}};
+      const selectedFeatureIds=project.features.filter(feature=>feature.kind!=='constraint'&&feature.requirementIds.some(requirementId=>project.requirements.find(requirement=>requirement.id===requirementId)?.deliveryScope!=='excluded')).map(feature=>feature.id);
+      if(selectedFeatureIds.length&&project.inputSnapshotPath){
+        const ready=project.delivery.state==='ready',packageRoot=path.join(this.root,id,'result',ready?'deliveries':'drafts');
+        const written=await writeAgentPackage(project,task,packageRoot,undefined,{selectedFeatureIds});
+        task.artifacts=[{id:`A-${randomUUID().slice(0,8).toUpperCase()}`,kind:ready?'agent-package':'draft',path:written.directory,resultVersion,createdAt:Date.now()}];
+      }
       delete task.archivedAt;this.tasks.set(id,task);await this.publish(task);return structuredClone(task);
     })
   }

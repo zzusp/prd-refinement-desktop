@@ -853,6 +853,7 @@ function TaskPage({
   const [detail, setDetail] = useState<RequirementDetail>();
   const [featureFilter, setFeatureFilter] = useState<string>();
   const [artifact, setArtifact] = useState<TaskArtifact>();
+  const [artifactLoaded, setArtifactLoaded] = useState(false);
   const [artifactAction, setArtifactAction] = useState<"generate" | "open">();
   const [actionMessage, setActionMessage] = useState<{
     kind: "success" | "error";
@@ -885,6 +886,8 @@ function TaskPage({
   }, [task.status]);
   useEffect(() => {
     let current = true;
+    setArtifact(undefined);
+    setArtifactLoaded(false);
     void window.prdApp
       .queryAnalysisArtifacts(task.id)
       .then((items) => {
@@ -892,10 +895,12 @@ function TaskPage({
         setArtifact(
           items.find((item) => item.resultVersion === taskVersion(task) && item.exists),
         );
+        setArtifactLoaded(true);
       })
       .catch((value) => {
         if (!current) return;
         setArtifact(undefined);
+        setArtifactLoaded(true);
         setActionMessage({
           kind: "error",
           text:
@@ -1003,29 +1008,27 @@ function TaskPage({
           <p>{task.project.sourceName}</p>
         </div>
         <div className="workspace-actions">
-          <button
-            className="primary"
-            disabled={
-              !inScope ||
-              artifactAction === "generate" ||
-              busy ||
-              !!task.archivedAt
-            }
-            aria-busy={artifactAction === "generate"}
-            onClick={() => void generate()}
-          >
-            <PackageOpen />
-            {artifactAction === "generate" ? "正在生成" : "生成交付包"}
-          </button>
-          <button
-            className="secondary"
-            disabled={!artifact || artifactAction === "open"}
-            aria-busy={artifactAction === "open"}
-            onClick={() => void open()}
-          >
-            <FolderOpen />
-            {artifactAction === "open" ? "正在打开" : "打开产物"}
-          </button>
+          {artifact ? (
+            <button
+              className="primary"
+              disabled={artifactAction === "open"}
+              aria-busy={artifactAction === "open"}
+              onClick={() => void open()}
+            >
+              <FolderOpen />
+              {artifactAction === "open" ? "正在打开" : "打开产物"}
+            </button>
+          ) : artifactLoaded && canAdjust && inScope ? (
+            <button
+              className="secondary"
+              disabled={artifactAction === "generate"}
+              aria-busy={artifactAction === "generate"}
+              onClick={() => void generate()}
+            >
+              <PackageOpen />
+              {artifactAction === "generate" ? "正在重新生成" : "重新生成产物"}
+            </button>
+          ) : null}
           <details className="more-menu">
             <summary aria-label="更多任务操作">
               <MoreHorizontal />

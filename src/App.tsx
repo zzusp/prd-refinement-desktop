@@ -645,7 +645,7 @@ function TaskCenter({
             <span>状态</span>
             <span>当前阶段</span>
             <span>进度</span>
-            <span>墙钟耗时</span>
+            <span>总耗时</span>
             <span>创建时间</span>
             <span>操作</span>
           </div>
@@ -1085,13 +1085,13 @@ function TaskPage({
         </em>
         <span>本期 {inScope} 条</span>
         <span>本期不做 {excluded} 条</span>
+        {showRuntimeCost && (
+          <details>
+            <summary>耗时/用量</summary>
+            <RuntimeCost task={task} />
+          </details>
+        )}
       </div>
-      {showRuntimeCost && (
-        <section className="workspace-cost" aria-label="耗时和用量">
-          <h2>耗时/用量</h2>
-          <RuntimeCost task={task} />
-        </section>
-      )}
       {actionMessage && (
         <p
           className={`workspace-message ${actionMessage.kind}`}
@@ -1539,7 +1539,7 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
     <section className="runtime-cost-wrap">
       <div className="runtime-cost" aria-label="运行统计">
         <div className="runtime-time primary-time">
-          <span>点击到结果</span>
+          <span>总耗时</span>
           <strong>{elapsed(0, wall)}</strong>
           <small>从提交任务到当前结果</small>
         </div>
@@ -1561,8 +1561,8 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
           <div><dt>输出</dt><dd>{measured ? output.toLocaleString() : "—"}</dd></div>
         </dl>
       </div>
-      <details className="runtime-cost-breakdown">
-        <summary>查看节点成本分布</summary>
+      <section className="runtime-cost-breakdown" aria-label="节点成本分布">
+        <h3>节点成本分布</h3>
         <div className="runtime-cost-table">
           <table>
             <thead>
@@ -1595,7 +1595,7 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
             </tbody>
           </table>
         </div>
-      </details>
+      </section>
     </section>
   );
 }
@@ -1673,7 +1673,7 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
       </div>
       <footer>
         <Clock3 />
-        点击到当前结果 {elapsed(task.requestedAt??task.startedAt, task.completedAt, now)}
+        总耗时 {elapsed(task.requestedAt??task.startedAt, task.completedAt, now)}
       </footer>
     </section>
   );

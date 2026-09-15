@@ -60,9 +60,10 @@ describe('需求细化数据契约', () => {
     expect(cost).toContain('gpt-5.6-luna');
     expect(cost).toContain('推理深度');
     expect(cost).toContain('<td>低</td>');
-    expect(cost).toContain('<details class="runtime-cost-breakdown">');
-    expect(cost).toContain('查看节点成本分布');
-    expect(cost).not.toContain('<details class="runtime-cost-breakdown" open="">');
+    expect(cost).toContain('aria-label="节点成本分布"');
+    expect(cost).toContain('节点成本分布');
+    expect(cost).not.toContain('<details class="runtime-cost-breakdown"');
+    expect(cost).not.toContain('查看节点成本分布');
   });
 
   it('逐功能细化明确区分简单功能、复杂功能与补漏模型的职责', () => {
@@ -80,7 +81,7 @@ describe('需求细化数据契约', () => {
     const progress=renderToStaticMarkup(React.createElement(Progress,{task,now:3000}));
     expect(progress).toContain('已识别 17/17 个候选内容');expect(progress).toContain('累计业务调用 19 次');expect(progress).not.toContain('来源包');expect(progress).not.toContain('运行 19 轮');
   });
-  it('区分模型活跃耗时、等待重试与点击到结果耗时',()=>{
+  it('区分模型活跃耗时、等待重试与总耗时',()=>{
     const task={status:'failed',startedAt:1000,completedAt:13000,steps:[],runtimeMetrics:[
       {sessionId:'prd-T-a1-candidate-1-try1',startedAt:1000,completedAt:4000,durationMs:3000,adapter:'codex-oauth',model:'fast',reasoningEffort:'low'},
       {sessionId:'prd-T-a1-coverage-2-try1',startedAt:2000,completedAt:5000,durationMs:3000,adapter:'codex-oauth',model:'sol',reasoningEffort:'low'},
@@ -88,7 +89,7 @@ describe('需求细化数据契约', () => {
     ],project:{}} as AnalysisTask;
     expect(runtimeTiming(task)).toEqual({active:7000,retryWait:5000});
     const cost=renderToStaticMarkup(React.createElement(RuntimeCost,{task}));
-    expect(cost).toContain('模型活跃');expect(cost).toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
+    expect(cost).toContain('模型活跃');expect(cost).toContain('总耗时');expect(cost).not.toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
   });
 
   it('结果页使用一个任务级自然语言调整入口',()=>{
@@ -173,6 +174,8 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('调整结果');
     expect(html).not.toContain('调整本版结果');
     expect(html).not.toContain('概览');
+    expect(html).toContain('<summary>耗时/用量</summary>');
+    expect(html).not.toContain('<details open=""><summary>耗时/用量</summary>');
     expect(html.match(/耗时\/用量/g)).toHaveLength(1);
     expect(html).toContain('节点成本分布');
   });

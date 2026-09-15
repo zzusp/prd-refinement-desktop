@@ -191,6 +191,63 @@ function stepRuntimeItems(task: AnalysisTask, stepId: string) {
 function stepDisplayNote(note: string) {
   return note.replaceAll("来源包", "候选内容");
 }
+export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"][number]) {
+  if (step.status === "pending") return undefined;
+  const checkpoint = task.checkpoint;
+  const project = task.project;
+  const uniqueCount = (ids: Array<string | undefined>) =>
+    new Set(ids.filter((id): id is string => !!id)).size;
+
+  switch (step.id) {
+    case "inventory": {
+      const files = project?.sourceDocuments?.length ?? 0;
+      const units = project?.sourceUnits?.filter((unit) => !unit.synthetic).length ?? 0;
+      return files && units
+        ? `读取 ${files} 个文件，建立 ${units} 个原文片段`
+        : units
+          ? `建立 ${units} 个原文片段`
+          : undefined;
+    }
+    case "candidates": {
+      const count = uniqueCount(
+        (checkpoint?.featureCandidateBatches ?? []).flat().map((feature) => feature.id),
+      );
+      return count ? `识别出 ${count} 个功能候选` : undefined;
+    }
+    case "unify": {
+      const count = checkpoint?.boundaryUnified?.length ?? 0;
+      return count ? `整理为 ${count} 个功能模块` : undefined;
+    }
+    case "details": {
+      const results = Object.values(checkpoint?.detailResults ?? {});
+      const features = results.length;
+      const requirements = uniqueCount(
+        results.flatMap((result) => result.requirements.map((item) => item.id)),
+      );
+      if (!features) return undefined;
+      const total = checkpoint?.boundaryUnified?.length;
+      return step.status === "running" && total
+        ? `已细化 ${features}/${total} 个模块，共 ${requirements} 条需求`
+        : `${features} 个模块，共 ${requirements} 条需求`;
+    }
+    case "audit": {
+      const count = uniqueCount(checkpoint?.auditedFeatureIds ?? []);
+      return count ? `已核查 ${count} 个功能模块` : undefined;
+    }
+    case "repair": {
+      if (step.status !== "completed" || !checkpoint?.auditIssues) return undefined;
+      return checkpoint.auditIssues.some((issue) => issue.disposition === "repaired")
+        ? "已完成必要修正"
+        : "无需修正";
+    }
+    case "delivery": {
+      if (step.status !== "completed" || !project) return undefined;
+      return `${project.features?.length ?? 0} 个模块、${project.requirements?.length ?? 0} 条需求已保存`;
+    }
+    default:
+      return undefined;
+  }
+}
 type Page = "tasks" | "upload" | "task" | "settings";
 type ResultTab = "features" | "requirements" | "execution";
 type AdjustmentRequest = RefinementAdjustmentRequest;
@@ -1517,12 +1574,14 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
           const current =
               s.status === "running" && s.startedAt ? now - s.startedAt : 0,
             total = (s.durationMs ?? 0) + current,
-            items = stepRuntimeItems(task, s.id);
+            items = stepRuntimeItems(task, s.id),
+            output = stepOutputSummary(task, s);
           return (
             <div className={`step ${s.status}`} key={s.id}>
               <i>{s.status === "completed" ? <CheckCircle2 /> : i + 1}</i>
               <div>
                 <strong>{s.name}</strong>
+                {output && <small className="step-output">产出：{output}</small>}
                 <small>
                   {stepDisplayNote(s.note)}
                   {(s.runs ?? 0) > 0 ? `；累计业务调用 ${s.runs} 次` : ""}

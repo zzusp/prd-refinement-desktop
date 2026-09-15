@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
+import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, stepOutputSummary, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
@@ -14,6 +14,15 @@ describe('需求细化数据契约', () => {
   });
   it('七阶段进度显示为整数百分比',()=>{
     expect(displayProgress(42.85714285714286)).toBe(43);
+  });
+  it('执行阶段根据已确认检查点显示简短产出摘要',()=>{
+    const task={status:'running',project:{sourceDocuments:[{fileId:'D-1'}],sourceUnits:[{id:'E-1'},{id:'E-2'}],features:[],requirements:[]},checkpoint:{detailedFeatureIds:['F-1'],auditIssues:[],boundaryUnified:[{id:'F-1'},{id:'F-2'}],detailResults:{'F-1':{requirements:[{id:'R-1'},{id:'R-2'}],clarifications:[]}}}} as unknown as AnalysisTask;
+    expect(stepOutputSummary(task,{id:'inventory',name:'原文建账',note:'',status:'completed'})).toBe('读取 1 个文件，建立 2 个原文片段');
+    expect(stepOutputSummary(task,{id:'details',name:'逐功能细化',note:'',status:'running'})).toBe('已细化 1/2 个模块，共 2 条需求');
+    expect(stepOutputSummary(task,{id:'repair',name:'有据修正',note:'',status:'completed'})).toBe('无需修正');
+    expect(stepOutputSummary(task,{id:'delivery',name:'结果发布',note:'',status:'pending'})).toBeUndefined();
+    const html=renderToStaticMarkup(React.createElement(Progress,{task:{...task,progress:50,steps:[{id:'details',name:'逐功能细化',note:'已细化 1/2 个功能',status:'running'}]} as AnalysisTask,now:3000}));
+    expect(html).toContain('产出：已细化 1/2 个模块，共 2 条需求');
   });
   it('同一任务完成并登记产物后会触发产物状态刷新',()=>{
     const running={id:'T-1',status:'running',steps:[],project:{}} as AnalysisTask;

@@ -191,6 +191,84 @@ function stepRuntimeItems(task: AnalysisTask, stepId: string) {
 function stepDisplayNote(note: string) {
   return note.replaceAll("来源包", "候选内容");
 }
+export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"][number]) {
+  if (step.status === "pending") return undefined;
+  const checkpoint = task.checkpoint;
+  const project = task.project;
+  const array = <T,>(value: T[] | undefined | null): T[] =>
+    Array.isArray(value) ? value : [];
+  const uniqueCount = (ids: Array<string | undefined>) =>
+    new Set(ids.filter((id): id is string => !!id)).size;
+
+  switch (step.id) {
+    case "inventory": {
+      const files = array(project?.sourceDocuments).length;
+      const units = array(project?.sourceUnits).filter((unit) => unit && !unit.synthetic).length;
+      return files && units
+        ? `读取 ${files} 个文件，建立 ${units} 个原文片段`
+        : units
+          ? `建立 ${units} 个原文片段`
+          : undefined;
+    }
+    case "candidates": {
+      const count = uniqueCount(
+        array(checkpoint?.featureCandidateBatches)
+          .flatMap((batch) => array(batch))
+          .map((feature) => feature?.id),
+      );
+      return count ? `识别出 ${count} 个功能候选` : undefined;
+    }
+    case "unify": {
+      const count = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds));
+      if (!count) return undefined;
+      return step.status === "running"
+        ? `已整理 ${count} 个功能模块`
+        : `整理为 ${count} 个功能模块`;
+    }
+    case "details": {
+      const results = checkpoint?.detailResults && typeof checkpoint.detailResults === "object"
+        ? Object.values(checkpoint.detailResults).filter(Boolean)
+        : [];
+      const features = results.length;
+      const requirements = uniqueCount(
+        results.flatMap((result) => array(result.requirements).map((item) => item?.id)),
+      );
+      if (!features) return undefined;
+      const total = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds))
+        || undefined;
+      return step.status === "running" && total
+        ? `已细化 ${features}/${total} 个模块，共 ${requirements} 条需求`
+        : `${features} 个模块，共 ${requirements} 条需求`;
+    }
+    case "audit": {
+      const audited = uniqueCount(array(checkpoint?.auditedFeatureIds));
+      const succeeded = checkpoint?.auditWorkStates && typeof checkpoint.auditWorkStates === "object"
+        ? Object.values(checkpoint.auditWorkStates).filter((work) => work?.state === "succeeded").length
+        : 0;
+      const count = Math.max(audited, succeeded);
+      if (!count) return undefined;
+      const total = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds));
+      return step.status === "running" && total
+        ? `已核查 ${count}/${total} 个功能模块`
+        : `已核查 ${count} 个功能模块`;
+    }
+    case "repair": {
+      if (step.status !== "completed" || !Array.isArray(checkpoint?.auditIssues)) return undefined;
+      return checkpoint.auditIssues.some((issue) => issue?.disposition === "repaired")
+        ? "已完成必要修正"
+        : "无需修正";
+    }
+    case "delivery": {
+      if (step.status !== "completed" || !project) return undefined;
+      return `${array(project.features).length} 个模块、${array(project.requirements).length} 条需求已保存`;
+    }
+    default:
+      return undefined;
+  }
+}
 type Page = "tasks" | "upload" | "task" | "settings";
 type ResultTab = "features" | "requirements" | "execution";
 type AdjustmentRequest = RefinementAdjustmentRequest;
@@ -567,7 +645,7 @@ function TaskCenter({
             <span>状态</span>
             <span>当前阶段</span>
             <span>进度</span>
-            <span>墙钟耗时</span>
+            <span>总耗时</span>
             <span>创建时间</span>
             <span>操作</span>
           </div>
@@ -775,13 +853,15 @@ function TaskPage({
   const [detail, setDetail] = useState<RequirementDetail>();
   const [featureFilter, setFeatureFilter] = useState<string>();
   const [artifact, setArtifact] = useState<TaskArtifact>();
+  const [artifactLoaded, setArtifactLoaded] = useState(false);
   const [artifactAction, setArtifactAction] = useState<"generate" | "open">();
   const [actionMessage, setActionMessage] = useState<{
     kind: "success" | "error";
     text: string;
   }>();
   const [deleting, setDeleting] = useState(false),
-    [managing, setManaging] = useState(false);
+    [managing, setManaging] = useState(false),
+    [adjusting, setAdjusting] = useState(false);
   const [failureAction, setFailureAction] = useState<"retry" | "restart">();
   const rootKey = taskRootId(task);
   const inScope = task.project.requirements.filter(
@@ -791,7 +871,9 @@ function TaskPage({
     canAdjust =
       !task.archivedAt &&
       (task.status === "completed" || task.status === "needs-attention"),
-    busy = task.status === "running" || task.status === "queued";
+    busy = task.status === "running" || task.status === "queued",
+    showRuntimeCost =
+      !!task.runtimeMetrics?.length || !!task.checkpoint?.promptMetrics?.length;
   useEffect(() => {
     setTab(
       task.status === "running" || task.status === "queued" || task.status === "failed"
@@ -801,12 +883,15 @@ function TaskPage({
     setFeatureFilter(undefined);
     setDetail(undefined);
     setFailureAction(undefined);
+    setAdjusting(false);
   }, [rootKey]);
   useEffect(() => {
     if (task.status !== "failed") setFailureAction(undefined);
   }, [task.status]);
   useEffect(() => {
     let current = true;
+    setArtifact(undefined);
+    setArtifactLoaded(false);
     void window.prdApp
       .queryAnalysisArtifacts(task.id)
       .then((items) => {
@@ -814,10 +899,12 @@ function TaskPage({
         setArtifact(
           items.find((item) => item.resultVersion === taskVersion(task) && item.exists),
         );
+        setArtifactLoaded(true);
       })
       .catch((value) => {
         if (!current) return;
         setArtifact(undefined);
+        setArtifactLoaded(true);
         setActionMessage({
           kind: "error",
           text:
@@ -925,29 +1012,38 @@ function TaskPage({
           <p>{task.project.sourceName}</p>
         </div>
         <div className="workspace-actions">
-          <button
-            className="primary"
-            disabled={
-              !inScope ||
-              artifactAction === "generate" ||
-              busy ||
-              !!task.archivedAt
-            }
-            aria-busy={artifactAction === "generate"}
-            onClick={() => void generate()}
-          >
-            <PackageOpen />
-            {artifactAction === "generate" ? "正在生成" : "生成交付包"}
-          </button>
-          <button
-            className="secondary"
-            disabled={!artifact || artifactAction === "open"}
-            aria-busy={artifactAction === "open"}
-            onClick={() => void open()}
-          >
-            <FolderOpen />
-            {artifactAction === "open" ? "正在打开" : "打开产物"}
-          </button>
+          {artifact ? (
+            <button
+              className="primary"
+              disabled={artifactAction === "open"}
+              aria-busy={artifactAction === "open"}
+              onClick={() => void open()}
+            >
+              <FolderOpen />
+              {artifactAction === "open" ? "正在打开" : "打开产物"}
+            </button>
+          ) : artifactLoaded && canAdjust && inScope ? (
+            <button
+              className="secondary"
+              disabled={artifactAction === "generate"}
+              aria-busy={artifactAction === "generate"}
+              onClick={() => void generate()}
+            >
+              <PackageOpen />
+              {artifactAction === "generate" ? "正在重新生成" : "重新生成产物"}
+            </button>
+          ) : null}
+          {canAdjust && (
+            <button
+              className="secondary"
+              aria-expanded={adjusting}
+              aria-controls="task-adjustment-panel"
+              onClick={() => setAdjusting((value) => !value)}
+            >
+              <ListChecks />
+              {adjusting ? "收起调整" : "调整结果"}
+            </button>
+          )}
           <details className="more-menu">
             <summary aria-label="更多任务操作">
               <MoreHorizontal />
@@ -989,10 +1085,12 @@ function TaskPage({
         </em>
         <span>本期 {inScope} 条</span>
         <span>本期不做 {excluded} 条</span>
-        <details>
-          <summary>耗时/用量</summary>
-          <RuntimeCost task={task} />
-        </details>
+        {showRuntimeCost && (
+          <details>
+            <summary>耗时/用量</summary>
+            <RuntimeCost task={task} />
+          </details>
+        )}
       </div>
       {actionMessage && (
         <p
@@ -1001,6 +1099,11 @@ function TaskPage({
         >
           {actionMessage.text}
         </p>
+      )}
+      {canAdjust && adjusting && (
+        <div id="task-adjustment-panel">
+          <TaskFeedback task={task} onAdjust={onAdjust} onClose={() => setAdjusting(false)} />
+        </div>
       )}
       <Results
         task={task}
@@ -1016,7 +1119,6 @@ function TaskPage({
         now={now}
       />
       {task.project.analysisInput?.text&&<details className="task-input-summary"><summary>本次分析输入 <span>用户补充 · {task.project.analysisInput.text.length.toLocaleString('zh-CN')} 字</span></summary><div><small>提交于 {new Date(task.project.analysisInput.submittedAt).toLocaleString('zh-CN')} · 已随第 {task.project.analysisInput.revision} 版输入固定</small><pre>{task.project.analysisInput.text}</pre>{task.project.analysisInputApplications?.length?<section className="input-application-list"><h4>平台如何使用这些内容</h4>{task.project.analysisInputApplications.map(item=><article key={item.sourceUnitId}><strong>{item.kind==='business-fact'?'业务补充':item.kind==='scope-decision'?'本期范围':item.kind==='organization'?'整理要求':item.kind==='question'?'待回答问题':'替换口径'}</strong><span>{item.summary}</span><em>{item.status==='pending'?'仍待确认':item.affectedFeatureIds.length?`已应用到 ${item.affectedFeatureIds.length} 个功能`:'已记录'}</em></article>)}</section>:null}</div></details>}
-      {canAdjust && <TaskFeedback task={task} onAdjust={onAdjust} />}{" "}
       {detail && (
         <Drawer
           project={task.project}
@@ -1208,16 +1310,18 @@ function feedbackStorage() {
 export function TaskFeedback({
   task,
   onAdjust,
+  onClose,
 }: {
   task: AnalysisTask;
   onAdjust: (request: AdjustmentRequest) => Promise<void>;
+  onClose?: () => void;
 }) {
   const storageKey = `prd-feedback-draft:${taskRootId(task)}`;
   const [draft, setDraft] = useState(() =>
     loadFeedbackDraft(feedbackStorage(), storageKey),
   );
-  const [expanded, setExpanded] = useState(false),
-    [busy, setBusy] = useState(false),
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [busy, setBusy] = useState(false),
     [message, setMessage] = useState<{
       kind: "error" | "success";
       text: string;
@@ -1232,6 +1336,9 @@ export function TaskFeedback({
   useEffect(() => {
     saveFeedbackDraft(feedbackStorage(), storageKey, draft);
   }, [storageKey, draft]);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -1269,7 +1376,7 @@ export function TaskFeedback({
   }
   return (
     <section
-      className={`task-feedback ${expanded ? "expanded" : ""}`}
+      className="task-feedback expanded"
       aria-labelledby="task-feedback-title"
     >
       {results.length > 0 && (
@@ -1302,27 +1409,21 @@ export function TaskFeedback({
       <form noValidate onSubmit={submit}>
         <div className="task-feedback-heading">
           <div>
-            <h2 id="task-feedback-title">描述你希望怎么调整</h2>
+            <h2 id="task-feedback-title">调整本版结果</h2>
             <p>
               可以调整模块组织、需求颗粒度或指出遗漏。清单中的功能和需求必须存在于 PRD，并保留原意。
             </p>
           </div>
-          <button
-            className="text-action"
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? "收起输入区" : "展开输入区"}
-          </button>
+          {onClose && <button className="text-action" type="button" onClick={onClose}>收起</button>}
         </div>
         <label htmlFor="task-feedback-input" className="sr-only">
           调整说明
         </label>
         <textarea
+          ref={inputRef}
           id="task-feedback-input"
           className="resize-none"
-          rows={expanded ? 12 : 3}
+          rows={6}
           value={draft}
           disabled={busy}
           aria-invalid={message?.kind === "error"}
@@ -1438,7 +1539,7 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
     <section className="runtime-cost-wrap">
       <div className="runtime-cost" aria-label="运行统计">
         <div className="runtime-time primary-time">
-          <span>点击到结果</span>
+          <span>总耗时</span>
           <strong>{elapsed(0, wall)}</strong>
           <small>从提交任务到当前结果</small>
         </div>
@@ -1460,8 +1561,8 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
           <div><dt>输出</dt><dd>{measured ? output.toLocaleString() : "—"}</dd></div>
         </dl>
       </div>
-      <details>
-        <summary>查看节点成本分布</summary>
+      <section className="runtime-cost-breakdown" aria-label="节点成本分布">
+        <h3>节点成本分布</h3>
         <div className="runtime-cost-table">
           <table>
             <thead>
@@ -1494,7 +1595,7 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
             </tbody>
           </table>
         </div>
-      </details>
+      </section>
     </section>
   );
 }
@@ -1517,12 +1618,22 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
           const current =
               s.status === "running" && s.startedAt ? now - s.startedAt : 0,
             total = (s.durationMs ?? 0) + current,
-            items = stepRuntimeItems(task, s.id);
+            items = stepRuntimeItems(task, s.id),
+            output = stepOutputSummary(task, s);
           return (
             <div className={`step ${s.status}`} key={s.id}>
               <i>{s.status === "completed" ? <CheckCircle2 /> : i + 1}</i>
-              <div>
-                <strong>{s.name}</strong>
+              <div className="step-main">
+                <div className="step-heading">
+                  <strong>{s.name}</strong>
+                  <span className="step-duration">
+                    {s.status === "running"
+                      ? `已执行 ${elapsed(0, total)}`
+                      : s.status === "completed"
+                        ? `累计 ${elapsed(0, total)}`
+                        : "等待执行"}
+                  </span>
+                </div>
                 <small>
                   {stepDisplayNote(s.note)}
                   {(s.runs ?? 0) > 0 ? `；累计业务调用 ${s.runs} 次` : ""}
@@ -1549,21 +1660,20 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
                     </small>
                   )}
                 </div>
+                {output && (
+                  <small className={`step-output ${s.status === "running" ? "current" : "final"}`}>
+                    <b>{s.status === "running" ? "当前产出" : "产出"}</b>
+                    <span>{output}</span>
+                  </small>
+                )}
               </div>
-              <span>
-                {s.status === "running"
-                  ? `已执行 ${elapsed(0, total)}`
-                  : s.status === "completed"
-                    ? `累计 ${elapsed(0, total)}`
-                    : "等待执行"}
-              </span>
             </div>
           );
         })}
       </div>
       <footer>
         <Clock3 />
-        点击到当前结果 {elapsed(task.requestedAt??task.startedAt, task.completedAt, now)}
+        总耗时 {elapsed(task.requestedAt??task.startedAt, task.completedAt, now)}
       </footer>
     </section>
   );
@@ -1594,15 +1704,20 @@ function Results({
   onRecover: (action: "retry" | "restart") => void;
   now: number;
 }) {
-  const tabs: [ResultTab, string][] = [
-      ["features", "功能与需求"],
-      ["requirements", "全部需求"],
+  const tabs: [ResultTab, string, number?][] = [
+      [
+        "features",
+        "功能与需求",
+        project.features.filter((feature) => feature.kind !== "constraint")
+          .length,
+      ],
+      ["requirements", "全部需求", project.requirements.length],
       ["execution", "执行记录"],
     ];
   return (
     <section className="result-workspace">
       <nav className="result-tabs" aria-label="任务结果视图">
-        {tabs.map(([id, label]) => (
+        {tabs.map(([id, label, count]) => (
           <button
             aria-pressed={tab === id}
             className={tab === id ? "active" : ""}
@@ -1613,6 +1728,7 @@ function Results({
             key={id}
           >
             {label}
+            {count !== undefined && <b className="tab-count">{count}</b>}
           </button>
         ))}
       </nav>
@@ -1669,7 +1785,6 @@ export function ExecutionRecord({ task, now, failureAction, onRecover }: { task:
         </div>
       )}
       <Progress task={task} now={now} />
-      <RuntimeCost task={task} />
     </section>
   );
 }
@@ -1844,7 +1959,7 @@ function FeatureList({
     }
   }
   return (
-    <Collection title="功能与需求" count={rows.length}>
+    <Collection title="功能与需求" count={rows.length} hideHeader>
       <ListControls
         q={q}
         filter={filter}
@@ -2013,11 +2128,18 @@ function RequirementList({
     <Collection
       title={feature ? `需求明细 · ${featureTitle(p, feature)}` : "全部需求"}
       count={rows.length}
+      hideHeader
     >
       {feature && (
-        <button className="text-action clear-feature" onClick={onClearFeature}>
-          查看全部需求
-        </button>
+        <div className="active-feature-filter" role="status">
+          <span>当前功能</span>
+          <strong>{featureTitle(p, feature)}</strong>
+          <b>{rows.length} 条需求</b>
+          <button className="text-action" onClick={onClearFeature}>
+            <X />
+            清除筛选
+          </button>
+        </div>
       )}
       <ListControls
         q={q}
@@ -2058,7 +2180,6 @@ function RequirementList({
             <span>编号</span>
             <span>需求明细</span>
             <span>原文</span>
-            <span>检查状态</span>
             <span>本期范围</span>
           </div>
         </div>
@@ -2093,13 +2214,6 @@ function RequirementList({
                   <small>{p.features.find(feature => feature.id === item.featureId) ? featureTitle(p, p.features.find(feature => feature.id === item.featureId)!) : '模块待定位'}</small>
                 </span>
                 <b>{requirementSourceRefs(item).length}</b>
-                <b>
-                  {item.state === "needs-clarification"
-                    ? "待核查"
-                    : item.state === "reviewed"
-                      ? "检查通过"
-                      : "尚未检查"}
-                </b>
                 <em
                   className={`scope-badge ${item.deliveryScope === "excluded" ? "excluded" : "current"}`}
                 >
@@ -2213,19 +2327,23 @@ function Pagination({
 function Collection({
   title,
   count,
+  hideHeader = false,
   children,
 }: {
   title: string;
   count: number;
+  hideHeader?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section className="collection result">
-      <div className="collection-head">
-        <h2>
-          {title} <b>{count}</b>
-        </h2>
-      </div>
+      {!hideHeader && (
+        <div className="collection-head">
+          <h2>
+            {title} <b>{count}</b>
+          </h2>
+        </div>
+      )}
       {children}
     </section>
   );
@@ -2252,13 +2370,6 @@ function Drawer({
         <div>
           <code>{item.id}</code>
           <h2>{requirementText(item)}</h2>
-          <small>
-            {item.state === "needs-clarification"
-              ? "待核查"
-              : item.state === "reviewed"
-                ? "检查通过"
-                : "尚未检查"}
-          </small>
         </div>
         <button onClick={onClose} aria-label="关闭">
           <X />

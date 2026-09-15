@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
+import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, stepOutputSummary, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
@@ -14,6 +14,24 @@ describe('需求细化数据契约', () => {
   });
   it('七阶段进度显示为整数百分比',()=>{
     expect(displayProgress(42.85714285714286)).toBe(43);
+  });
+  it('执行阶段根据已确认检查点显示简短产出摘要',()=>{
+    const task={status:'running',project:{sourceDocuments:[{fileId:'D-1'}],sourceUnits:[{id:'E-1'},{id:'E-2'}],features:[],requirements:[]},checkpoint:{detailedFeatureIds:['F-1'],auditIssues:[],materializedFeatureIds:['F-1','F-2'],detailResults:{'F-1':{requirements:[{id:'R-1'},{id:'R-2'}],clarifications:[]}}}} as unknown as AnalysisTask;
+    expect(stepOutputSummary(task,{id:'inventory',name:'原文建账',note:'',status:'completed'})).toBe('读取 1 个文件，建立 2 个原文片段');
+    expect(stepOutputSummary(task,{id:'unify',name:'功能清单整理',note:'',status:'running'})).toBe('已整理 2 个功能模块');
+    expect(stepOutputSummary(task,{id:'unify',name:'功能清单整理',note:'',status:'completed'})).toBe('整理为 2 个功能模块');
+    expect(stepOutputSummary(task,{id:'details',name:'逐功能细化',note:'',status:'running'})).toBe('已细化 1/2 个模块，共 2 条需求');
+    const auditing={...task,checkpoint:{...task.checkpoint,auditedFeatureIds:undefined,auditWorkStates:{'F-1':{state:'succeeded',inputHash:'x',attempts:1,updatedAt:1},'F-2':{state:'running',inputHash:'y',attempts:1,updatedAt:1}}}} as AnalysisTask;
+    expect(stepOutputSummary(auditing,{id:'audit',name:'产物依据核查',note:'',status:'running'})).toBe('已核查 1/2 个功能模块');
+    expect(stepOutputSummary(task,{id:'repair',name:'有据修正',note:'',status:'completed'})).toBe('无需修正');
+    expect(stepOutputSummary(task,{id:'delivery',name:'结果发布',note:'',status:'pending'})).toBeUndefined();
+    const html=renderToStaticMarkup(React.createElement(Progress,{task:{...task,progress:50,steps:[{id:'details',name:'逐功能细化',note:'已细化 1/2 个功能',status:'running'}]} as AnalysisTask,now:3000}));
+    expect(html).toContain('step-output current');
+    expect(html).toContain('<b>当前产出</b><span>已细化 1/2 个模块，共 2 条需求</span>');
+    expect(html.indexOf('当前产出')).toBeGreaterThan(html.indexOf('复杂功能细化'));
+    const transient={...task,checkpoint:{...task.checkpoint,featureCandidateBatches:[null],detailResults:{'F-1':null}},project:{...task.project,sourceUnits:null}} as unknown as AnalysisTask;
+    expect(()=>stepOutputSummary(transient,{id:'candidates',name:'功能候选识别',note:'',status:'running'})).not.toThrow();
+    expect(()=>stepOutputSummary(transient,{id:'details',name:'逐功能细化',note:'',status:'running'})).not.toThrow();
   });
   it('同一任务完成并登记产物后会触发产物状态刷新',()=>{
     const running={id:'T-1',status:'running',steps:[],project:{}} as AnalysisTask;
@@ -36,9 +54,16 @@ describe('需求细化数据契约', () => {
     expect(progress).toContain('只修订边界或分类问题');
     expect(progress).toContain('gpt-5.6-terra');
     expect(progress).toContain('推理 高');
+    expect(progress).toContain('class="step-heading"');
+    expect(progress).toContain('class="step-duration"');
+    expect(progress).toContain('已执行 2 秒');
     expect(cost).toContain('gpt-5.6-luna');
     expect(cost).toContain('推理深度');
     expect(cost).toContain('<td>低</td>');
+    expect(cost).toContain('aria-label="节点成本分布"');
+    expect(cost).toContain('节点成本分布');
+    expect(cost).not.toContain('<details class="runtime-cost-breakdown"');
+    expect(cost).not.toContain('查看节点成本分布');
   });
 
   it('逐功能细化明确区分简单功能、复杂功能与补漏模型的职责', () => {
@@ -56,7 +81,7 @@ describe('需求细化数据契约', () => {
     const progress=renderToStaticMarkup(React.createElement(Progress,{task,now:3000}));
     expect(progress).toContain('已识别 17/17 个候选内容');expect(progress).toContain('累计业务调用 19 次');expect(progress).not.toContain('来源包');expect(progress).not.toContain('运行 19 轮');
   });
-  it('区分模型活跃耗时、等待重试与点击到结果耗时',()=>{
+  it('区分模型活跃耗时、等待重试与总耗时',()=>{
     const task={status:'failed',startedAt:1000,completedAt:13000,steps:[],runtimeMetrics:[
       {sessionId:'prd-T-a1-candidate-1-try1',startedAt:1000,completedAt:4000,durationMs:3000,adapter:'codex-oauth',model:'fast',reasoningEffort:'low'},
       {sessionId:'prd-T-a1-coverage-2-try1',startedAt:2000,completedAt:5000,durationMs:3000,adapter:'codex-oauth',model:'sol',reasoningEffort:'low'},
@@ -64,13 +89,13 @@ describe('需求细化数据契约', () => {
     ],project:{}} as AnalysisTask;
     expect(runtimeTiming(task)).toEqual({active:7000,retryWait:5000});
     const cost=renderToStaticMarkup(React.createElement(RuntimeCost,{task}));
-    expect(cost).toContain('模型活跃');expect(cost).toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
+    expect(cost).toContain('模型活跃');expect(cost).toContain('总耗时');expect(cost).not.toContain('点击到结果');expect(cost).toContain('等待重试');expect(cost).toContain('7 秒');expect(cost).toContain('12 秒');expect(cost).toContain('5 秒');
   });
 
   it('结果页使用一个任务级自然语言调整入口',()=>{
     const task={id:'T-1',resultVersion:3,status:'completed',progress:100,steps:[],adjustment:{feedback:'统一含税',results:[{operationId:'OP-1',status:'applied',featureIds:['F-1'],clarificationIds:[],detail:'退款金额已统一为含税口径。'},{operationId:'OP-2',status:'needs-confirmation',featureIds:[],clarificationIds:[],detail:'仍需确认支付超时范围。'}]},project:{name:'订单',features:[],requirements:[],clarifications:[],sourceUnits:[]}} as unknown as AnalysisTask;
     const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
-    expect(html).toContain('描述你希望怎么调整');
+    expect(html).toContain('调整本版结果');
     expect(html).toContain('可以调整模块组织、需求颗粒度或指出遗漏');
     expect(html).toContain('按说明调整');
     expect(html).toContain('已落实 1 项，1 项仍需处理');
@@ -129,22 +154,30 @@ describe('需求细化数据契约', () => {
 
   it('完成任务默认进入功能范围工作台并集中任务动作',()=>{
     const requirement={id:'R-1',featureId:'F-1',text:'按条件返回订单。',sourceRefs:[],state:'reviewed',deliveryScope:'current'};
-    const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,completedAt:2,steps:[],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
+    const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,requestedAt:1,completedAt:2,steps:[],runtimeMetrics:[{sessionId:'details-F-1',adapter:'codex-oauth',model:'gpt-5.6-terra',reasoningEffort:'medium',startedAt:1,completedAt:2,durationMs:1}],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
     const noop=()=>undefined,asyncNoop=async()=>undefined;
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
     expect(html).toContain('全部需求');
+    expect(html.match(/class="tab-count"/g)).toHaveLength(2);
+    expect(html.match(/class="tab-count">1<\/b>/g)).toHaveLength(2);
+    expect(html).not.toContain('class="collection-head"');
     expect(html).not.toContain('待处理事项');
     expect(html).toContain('执行记录');
-    expect(html).toContain('生成交付包');
-    expect(html).toContain('打开产物');
+    expect(html).not.toContain('生成交付包');
+    expect(html).not.toContain('重新生成产物');
     expect(html).toContain('全选本页功能');
     expect(html).toContain('选择当前筛选全部（1）');
     expect(html).toContain('标记本期不做');
     expect(html).toContain('恢复本期');
     expect(html).toContain('取消选择');
-    expect(html).toContain('描述你希望怎么调整');
+    expect(html).toContain('调整结果');
+    expect(html).not.toContain('调整本版结果');
     expect(html).not.toContain('概览');
+    expect(html).toContain('<summary>耗时/用量</summary>');
+    expect(html).not.toContain('<details open=""><summary>耗时/用量</summary>');
+    expect(html.match(/耗时\/用量/g)).toHaveLength(1);
+    expect(html).toContain('节点成本分布');
   });
 
   it('失败任务提供继续与重新开始两个原地恢复动作',()=>{
@@ -169,13 +202,24 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('R-OLD');
     expect(html).toContain('requirement-columns');
     expect(html).not.toContain('需求内容待读取');
+    expect(html).not.toContain('检查状态');
+    expect(html).not.toContain('检查通过');
+    expect(html).not.toContain('class="collection-head"');
+    const filtered=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T-OLD',resultVersion:1,project} as AnalysisTask,p:project,featureId:'F-1',onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
+    expect(filtered).toContain('class="active-feature-filter"');
+    expect(filtered).toContain('当前功能');
+    expect(filtered).toContain('审核列表');
+    expect(filtered).toContain('1 条需求');
+    expect(filtered).toContain('清除筛选');
+    expect(filtered).not.toContain('查看全部需求');
+    expect(filtered).not.toContain('class="collection-head"');
   });
 });
 it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{
  const item={id:'R-1',featureId:'F-1',text:'允许查询订单。',sourceRefs:[{sourceUnitId:'S-1'}],state:'reviewed'} as const;
  const p={features:[{id:'F-1',name:'订单',requirementIds:['R-1']}],requirements:[item],sourceUnits:[{id:'S-1',excerpt:'用户登录后，可以按订单编号查询。',location:'第 10 行',logicalPath:'prd.md'}]} as any;
  const drawer=renderToStaticMarkup(React.createElement(Drawer,{project:p,item:item as any,onClose:()=>undefined}));
- expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');
+ expect(drawer).toContain('允许查询订单。');expect(drawer).toContain('用户登录后，可以按订单编号查询。');expect(drawer).toContain('第 10 行');expect(drawer).not.toContain('条件与限制');expect(drawer).not.toContain('原文明示验收条件');expect(drawer).not.toContain('检查通过');
  const list=renderToStaticMarkup(React.createElement(RequirementList,{task:{id:'T',status:'completed'} as any,p,onClearFeature:()=>undefined,onDetail:()=>undefined,onScope:async()=>undefined}));
  expect(list).toContain('订单');expect(list).toContain('允许查询订单。');expect(list).toContain('原文');
 });

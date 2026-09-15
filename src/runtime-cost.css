@@ -16,8 +16,10 @@
 .runtime-tokens>div { display:flex;align-items:baseline;justify-content:space-between;gap:18px;padding:9px 20px;border-left:1px solid var(--line); }
 .runtime-tokens>div:first-child { border-left:0; }
 .runtime-tokens dd { font-size:13px; }
-.runtime-cost-wrap details { border:1px solid var(--line);border-top:0;background:#fff;font-size:12px; }
-.runtime-cost-wrap summary { padding:9px 14px;color:var(--blue);cursor:pointer; }
+.workspace-cost { padding:14px 16px 2px;border:1px solid var(--line);border-top:0;background:#f8fafb; }
+.workspace-cost>h2 { margin:0 0 10px;color:var(--navy);font-size:13px; }
+.runtime-cost-breakdown { border:1px solid var(--line);border-top:0;background:#fff;font-size:12px; }
+.runtime-cost-breakdown>summary { padding:9px 14px;color:var(--blue);font-weight:700;cursor:pointer; }
 .runtime-cost-table { overflow-x:auto;scrollbar-gutter:stable; }
 .runtime-cost-wrap table { width:100%;border-collapse:collapse; }
 .runtime-cost-wrap th,.runtime-cost-wrap td { padding:8px 14px;border-top:1px solid #edf0f2;text-align:right;white-space:nowrap; }

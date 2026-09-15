@@ -57,6 +57,9 @@ describe('需求细化数据契约', () => {
     expect(cost).toContain('gpt-5.6-luna');
     expect(cost).toContain('推理深度');
     expect(cost).toContain('<td>低</td>');
+    expect(cost).toContain('<details class="runtime-cost-breakdown">');
+    expect(cost).toContain('查看节点成本分布');
+    expect(cost).not.toContain('<details class="runtime-cost-breakdown" open="">');
   });
 
   it('逐功能细化明确区分简单功能、复杂功能与补漏模型的职责', () => {
@@ -147,7 +150,7 @@ describe('需求细化数据契约', () => {
 
   it('完成任务默认进入功能范围工作台并集中任务动作',()=>{
     const requirement={id:'R-1',featureId:'F-1',text:'按条件返回订单。',sourceRefs:[],state:'reviewed',deliveryScope:'current'};
-    const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,completedAt:2,steps:[],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
+    const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,requestedAt:1,completedAt:2,steps:[],runtimeMetrics:[{sessionId:'details-F-1',adapter:'codex-oauth',model:'gpt-5.6-terra',reasoningEffort:'medium',startedAt:1,completedAt:2,durationMs:1}],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
     const noop=()=>undefined,asyncNoop=async()=>undefined;
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
@@ -167,6 +170,8 @@ describe('需求细化数据契约', () => {
     expect(html).toContain('调整结果');
     expect(html).not.toContain('调整本版结果');
     expect(html).not.toContain('概览');
+    expect(html.match(/耗时\/用量/g)).toHaveLength(1);
+    expect(html).toContain('节点成本分布');
   });
 
   it('失败任务提供继续与重新开始两个原地恢复动作',()=>{

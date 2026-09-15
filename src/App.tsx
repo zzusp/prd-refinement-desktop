@@ -871,7 +871,9 @@ function TaskPage({
     canAdjust =
       !task.archivedAt &&
       (task.status === "completed" || task.status === "needs-attention"),
-    busy = task.status === "running" || task.status === "queued";
+    busy = task.status === "running" || task.status === "queued",
+    showRuntimeCost =
+      !!task.runtimeMetrics?.length || !!task.checkpoint?.promptMetrics?.length;
   useEffect(() => {
     setTab(
       task.status === "running" || task.status === "queued" || task.status === "failed"
@@ -1083,11 +1085,13 @@ function TaskPage({
         </em>
         <span>本期 {inScope} 条</span>
         <span>本期不做 {excluded} 条</span>
-        <details>
-          <summary>耗时/用量</summary>
-          <RuntimeCost task={task} />
-        </details>
       </div>
+      {showRuntimeCost && (
+        <section className="workspace-cost" aria-label="耗时和用量">
+          <h2>耗时/用量</h2>
+          <RuntimeCost task={task} />
+        </section>
+      )}
       {actionMessage && (
         <p
           className={`workspace-message ${actionMessage.kind}`}
@@ -1557,7 +1561,7 @@ export function RuntimeCost({ task }: { task: AnalysisTask }) {
           <div><dt>输出</dt><dd>{measured ? output.toLocaleString() : "—"}</dd></div>
         </dl>
       </div>
-      <details>
+      <details className="runtime-cost-breakdown">
         <summary>查看节点成本分布</summary>
         <div className="runtime-cost-table">
           <table>
@@ -1779,7 +1783,6 @@ export function ExecutionRecord({ task, now, failureAction, onRecover }: { task:
         </div>
       )}
       <Progress task={task} now={now} />
-      <RuntimeCost task={task} />
     </section>
   );
 }

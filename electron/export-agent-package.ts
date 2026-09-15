@@ -2,16 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AnalysisTask, DeliveryAssessment, PrdProject, RequirementDetail } from '../src/types.js';
-import { sourceLocation } from './export-excel.js';
-import { featureTitle, requirementSourceRefs, requirementText } from '../src/result-presentation.js';
+import { featureTitle, readableContext, requirementSourceRefs, requirementText } from '../src/result-presentation.js';
 import { projectInputHash } from './task-execution-state.js';
 
 type DeliveryState = DeliveryAssessment['state'];
 type ExtendedTask = AnalysisTask & { runId?:string };
-const agentPackageSchemaVersion = 7 as const;
+const agentPackageSchemaVersion = 8 as const;
 
 export interface AgentPackageManifest {
-  schemaVersion: 7;
+  schemaVersion: 8;
   deliveryId: string;
   taskId: string;
   runId?: string;
@@ -86,19 +85,51 @@ function snapshot(project:PrdProject,task:ExtendedTask,assessment:DeliveryAssess
 }
 
 const checklistText = (value:string) => value.replace(/\r?\n/g,'<br>').trim();
+const markdownLabel = (value:string) => value.replace(/([\\[\]])/g,'\\$1');
+const markdownPath = (value:string) => value.split('/').map(encodeURIComponent).join('/');
+interface ChecklistSource { key:string; text:string }
+const sourceSetKey = (items:ChecklistSource[]) => JSON.stringify(items.map(item=>item.key).sort());
+function checklistSources(project:PrdProject) {
+  const referenced=new Set(project.requirements.flatMap(requirement=>requirementSourceRefs(requirement).map(ref=>ref.sourceUnitId)));
+  const paths=[...new Set(project.sourceUnits.filter(unit=>referenced.has(unit.id)).map(unit=>unit.logicalPath??project.sourceName))];
+  const primaryPath=project.sourceDocuments?.find(document=>document.role==='primary')?.logicalPath??project.sourceName;
+  const aliases=new Map(paths.map((logical,index)=>[logical,paths.length===1||logical===primaryPath?'主 PRD':`原文 ${index+1}`]));
+  const files=paths.map(logical=>`${aliases.get(logical)}：[${markdownLabel(logical)}](${markdownPath(`sources/files/${logical}`)})`);
+  const source=(ref:ReturnType<typeof requirementSourceRefs>[number]):ChecklistSource=>{
+    const unit=project.sourceUnits.find(item=>item.id===ref.sourceUnitId);if(!unit)throw new Error(`来源不存在：${ref.sourceUnitId}`);
+    const logical=unit.logicalPath??project.sourceName,alias=aliases.get(logical)??logical;
+    const rawPath=readableContext(unit.context).match(/章节路径：([^\n]+)/)?.[1];
+    const headingKey=rawPath?.split('→').map(value=>value.trim()).filter(Boolean).join(' → ');
+    const heading=headingKey?.replace(/\[S-[^\]]+\]\s*/g,'').trim();
+    const position=heading||unit.location;
+    return{key:JSON.stringify([logical,headingKey||unit.location]),text:`${alias} · ${position}`};
+  };
+  return{files,source};
+}
 function implementationMarkdown(project:PrdProject) {
   const requirements=new Map(project.requirements.map(item=>[item.id,item])),seen=new Set<string>();
-  const sections=['# 实施检查清单','', '> 完成一项后，将对应的 `- [ ]` 改为 `- [x]`。实现前仍需阅读 `sources/files/` 中的原始 PRD；本清单只用于逐项查漏。'];
+  const sources=checklistSources(project);
+  const sections=[`# ${checklistText(project.name)} · 需求检查清单`,'', '> 先阅读原始 PRD，再用本清单查漏；完成后勾选。','',...sources.files];
   for(const feature of project.features){
     const own=feature.requirementIds.map(id=>requirements.get(id)).filter((item):item is RequirementDetail=>!!item);
     if(!own.length)continue;
     sections.push('',`## ${feature.id} ${checklistText(featureTitle(project,feature))}`,'');
-    for(const requirement of own){
+    if(feature.kind==='constraint'&&feature.appliesToFeatureIds?.length)sections.push(`适用模块：${feature.appliesToFeatureIds.join('、')}`,'');
+    const locations=own.map(requirement=>{
+      const refs=requirementSourceRefs(requirement);if(!refs.length)throw new Error(`需求缺少原文：${requirement.id}`);
+      const unique=new Map<string,ChecklistSource>();for(const ref of refs){const value=sources.source(ref);unique.set(value.key,value)}
+      return [...unique.values()];
+    });
+    const counts=new Map<string,{count:number;first:number;items:ChecklistSource[]}>();
+    locations.forEach((items,index)=>{const key=sourceSetKey(items);const value=counts.get(key);if(value)value.count++;else counts.set(key,{count:1,first:index,items})});
+    const shared=[...counts.values()].filter(value=>value.count>=2).sort((a,b)=>b.count-a.count||a.first-b.first)[0];
+    const defaultKey=shared&&sourceSetKey(shared.items);
+    if(shared)sections.push(`默认原文：${shared.items.map(item=>item.text).join('；')}`,'');
+    for(const [index,requirement] of own.entries()){
       if(seen.has(requirement.id))throw new Error(`重复需求编号：${requirement.id}`);seen.add(requirement.id);
-      const refs=requirementSourceRefs(requirement);
-      if(!refs.length)throw new Error(`需求缺少原文：${requirement.id}`);
       sections.push(`- [ ] ${requirement.id}：${checklistText(requirementText(requirement))}`);
-      for(const location of sourceLocation(project,refs).split('\n'))sections.push(`  - 原文：${location}`);
+      const items=locations[index],key=sourceSetKey(items);
+      if(key!==defaultKey)sections.push(`  - 原文：${items.map(item=>item.text).join('；')}`);
     }
   }
   if(seen.size!==project.requirements.length)throw new Error('存在未进入实施清单的需求');
@@ -137,11 +168,11 @@ export async function writeAgentPackage(project:PrdProject,task:AnalysisTask,out
     const resultHash=sha256(implementation);
     await writeFile(path.join(temporaryDirectory,'agent-checklist.md'),implementation,'utf8');
     await writeFile(path.join(temporaryDirectory,'README.md'),[
-      `# ${project.name} 实施检查包`,'',
+      `# ${project.name} 需求检查包`,'',
       '1. 先阅读 `sources/files/` 中的原始 PRD 与相关资料。',
       '2. 结合目标代码仓库逐项实现 `agent-checklist.md` 中的需求。',
       '3. 每完成一项，将对应的 `- [ ]` 改为 `- [x]`。','',
-      '> `agent-checklist.md` 只用于查漏，不能替代原始 PRD；勾选也不等于业务验收通过。',''
+      '> `agent-checklist.md` 只用于查漏，不能替代原始 PRD；勾选表示已结合原文检查该项。',''
     ].join('\n'),'utf8');
     const sourceRoot=path.join(temporaryDirectory,'sources');await mkdir(sourceRoot,{recursive:true});
     if(!project.inputSnapshotPath)throw new Error('缺少冻结原始资料，不能导出交付包');

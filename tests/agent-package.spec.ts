@@ -81,14 +81,15 @@ describe('Agent 交付包',()=>{
     const {project,task}=await fixture(root);const assetPath=path.join(root,'原始图片.png'),asset=Buffer.from('fixture-image');await writeFile(assetPath,asset);project.sourceUnits[0].asset={path:assetPath,mimeType:'image/png',sha256:hash(asset),readStatus:'read'};const result=await writeAgentPackage(project,task,root,'delivery-1');
     expect(path.basename(result.directory)).toBe('delivery-1');expect(result.manifest.qualityState).toBe('ready');
     const names=(await readdir(result.directory)).sort();expect(names).toEqual(['README.md','agent-checklist.md','manifest.json','sources']);
-    expect(result.manifest.schemaVersion).toBe(7);
+    expect(result.manifest.schemaVersion).toBe(8);
     expect(await readdir(path.join(result.directory,'sources'))).toEqual(['files']);
     const readme=await readFile(path.join(result.directory,'README.md'),'utf8');expect(readme).toContain('agent-checklist.md');expect(readme).toContain('先阅读');
     const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('## F-001 提交订单');
     expect(implementation).toContain('- [ ] R-001：用户提交订单');
     expect(implementation).toContain('- [ ] R-900：操作前校验登录状态');
-    expect(implementation).toContain('  - 原文：sources/files/prd.md');
+    expect(implementation).toContain('主 PRD：[prd.md](sources/files/prd.md)');
+    expect(implementation).toContain('  - 原文：主 PRD · 第 1 段');
     expect(implementation.match(/^- \[ \] R-/gm)).toHaveLength(2);
     expect(await readFile(path.join(result.directory,'sources','files','prd.md'),'utf8')).toBe(project.rawText);
     for(const file of result.manifest.files){const data=await readFile(path.join(result.directory,...file.path.split('/')));expect(hash(data)).toBe(file.sha256);expect(data.length).toBe(file.size)}
@@ -104,6 +105,34 @@ describe('Agent 交付包',()=>{
     const implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
     expect(implementation).toContain('- [ ] R-001：用户填写“名称,规格”后提交<br>系统保留原始换行');
     expect(implementation.match(/^- \[ \] R-001：/gm)).toHaveLength(1);
+  });
+
+  it('模块共同来源只显示一次，特殊条目保留自己的完整来源',async()=>{
+    const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
+    project.sourceUnits=[
+      {id:'S-1',label:'新增',kind:'paragraph',excerpt:'支持新增。',location:'第 10 行',context:'<source-structure-context>\n章节路径：[S-H1] 活动管理 → [S-H2] 基础操作\n</source-structure-context>',status:'processed'},
+      {id:'S-2',label:'编辑',kind:'paragraph',excerpt:'支持编辑。',location:'第 11 行',context:'<source-structure-context>\n章节路径：[S-H1] 活动管理 → [S-H2] 基础操作\n</source-structure-context>',status:'processed'},
+      {id:'S-3',label:'历史',kind:'paragraph',excerpt:'支持查询历史。',location:'第 30 行',context:'<source-structure-context>\n章节路径：[S-H3] 附录 → [S-H4] 历史数据\n</source-structure-context>',status:'processed'},
+    ];
+    project.features=[{id:'F-001',name:'活动管理',kind:'function',sourceUnitIds:['S-1','S-2','S-3'],ruleIds:[],requirementIds:['R-001','R-002','R-003'],state:'reviewed'}];
+    project.requirements=[
+      {id:'R-001',featureId:'F-001',text:'支持新增',sourceRefs:[{sourceUnitId:'S-1'}],state:'reviewed'},
+      {id:'R-002',featureId:'F-001',text:'支持编辑',sourceRefs:[{sourceUnitId:'S-2'}],state:'reviewed'},
+      {id:'R-003',featureId:'F-001',text:'支持查询历史',sourceRefs:[{sourceUnitId:'S-1'},{sourceUnitId:'S-3'}],state:'reviewed'},
+    ];
+    const result=await writeAgentPackage(project,task,root,'compact-sources'),implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
+    expect(implementation.match(/默认原文：主 PRD · 活动管理 → 基础操作/g)).toHaveLength(1);
+    expect(implementation).toContain('- [ ] R-001：支持新增\n- [ ] R-002：支持编辑');
+    expect(implementation).toContain('- [ ] R-003：支持查询历史\n  - 原文：主 PRD · 活动管理 → 基础操作；主 PRD · 附录 → 历史数据');
+    expect(implementation.match(/^- \[ \] R-/gm)).toHaveLength(3);
+  });
+
+  it('公共约束只输出一次并列出适用模块',async()=>{
+    const root=await createTestWorkspace('prd-agent-package');roots.push(root);const {project,task}=await fixture(root);
+    const result=await writeAgentPackage(project,task,root,'constraint-scope'),implementation=await readFile(path.join(result.directory,'agent-checklist.md'),'utf8');
+    expect(implementation.match(/## F-900 登录约束/g)).toHaveLength(1);
+    expect(implementation).toContain('适用模块：F-001');
+    expect(implementation.match(/^- \[ \] R-900：/gm)).toHaveLength(1);
   });
 
   it('范围来自持久化需求字段，功能内可只排除部分需求',async()=>{

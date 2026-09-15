@@ -23,6 +23,9 @@ describe('需求细化数据契约', () => {
     expect(stepOutputSummary(task,{id:'delivery',name:'结果发布',note:'',status:'pending'})).toBeUndefined();
     const html=renderToStaticMarkup(React.createElement(Progress,{task:{...task,progress:50,steps:[{id:'details',name:'逐功能细化',note:'已细化 1/2 个功能',status:'running'}]} as AnalysisTask,now:3000}));
     expect(html).toContain('产出：已细化 1/2 个模块，共 2 条需求');
+    const transient={...task,checkpoint:{...task.checkpoint,featureCandidateBatches:[null],detailResults:{'F-1':null}},project:{...task.project,sourceUnits:null}} as unknown as AnalysisTask;
+    expect(()=>stepOutputSummary(transient,{id:'candidates',name:'功能候选识别',note:'',status:'running'})).not.toThrow();
+    expect(()=>stepOutputSummary(transient,{id:'details',name:'逐功能细化',note:'',status:'running'})).not.toThrow();
   });
   it('同一任务完成并登记产物后会触发产物状态刷新',()=>{
     const running={id:'T-1',status:'running',steps:[],project:{}} as AnalysisTask;

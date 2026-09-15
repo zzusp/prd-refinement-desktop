@@ -195,13 +195,15 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
   if (step.status === "pending") return undefined;
   const checkpoint = task.checkpoint;
   const project = task.project;
+  const array = <T,>(value: T[] | undefined | null): T[] =>
+    Array.isArray(value) ? value : [];
   const uniqueCount = (ids: Array<string | undefined>) =>
     new Set(ids.filter((id): id is string => !!id)).size;
 
   switch (step.id) {
     case "inventory": {
-      const files = project?.sourceDocuments?.length ?? 0;
-      const units = project?.sourceUnits?.filter((unit) => !unit.synthetic).length ?? 0;
+      const files = array(project?.sourceDocuments).length;
+      const units = array(project?.sourceUnits).filter((unit) => unit && !unit.synthetic).length;
       return files && units
         ? `读取 ${files} 个文件，建立 ${units} 个原文片段`
         : units
@@ -210,39 +212,43 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
     }
     case "candidates": {
       const count = uniqueCount(
-        (checkpoint?.featureCandidateBatches ?? []).flat().map((feature) => feature.id),
+        array(checkpoint?.featureCandidateBatches)
+          .flatMap((batch) => array(batch))
+          .map((feature) => feature?.id),
       );
       return count ? `识别出 ${count} 个功能候选` : undefined;
     }
     case "unify": {
-      const count = checkpoint?.boundaryUnified?.length ?? 0;
+      const count = array(checkpoint?.boundaryUnified).length;
       return count ? `整理为 ${count} 个功能模块` : undefined;
     }
     case "details": {
-      const results = Object.values(checkpoint?.detailResults ?? {});
+      const results = checkpoint?.detailResults && typeof checkpoint.detailResults === "object"
+        ? Object.values(checkpoint.detailResults).filter(Boolean)
+        : [];
       const features = results.length;
       const requirements = uniqueCount(
-        results.flatMap((result) => result.requirements.map((item) => item.id)),
+        results.flatMap((result) => array(result.requirements).map((item) => item?.id)),
       );
       if (!features) return undefined;
-      const total = checkpoint?.boundaryUnified?.length;
+      const total = array(checkpoint?.boundaryUnified).length || undefined;
       return step.status === "running" && total
         ? `已细化 ${features}/${total} 个模块，共 ${requirements} 条需求`
         : `${features} 个模块，共 ${requirements} 条需求`;
     }
     case "audit": {
-      const count = uniqueCount(checkpoint?.auditedFeatureIds ?? []);
+      const count = uniqueCount(array(checkpoint?.auditedFeatureIds));
       return count ? `已核查 ${count} 个功能模块` : undefined;
     }
     case "repair": {
-      if (step.status !== "completed" || !checkpoint?.auditIssues) return undefined;
-      return checkpoint.auditIssues.some((issue) => issue.disposition === "repaired")
+      if (step.status !== "completed" || !Array.isArray(checkpoint?.auditIssues)) return undefined;
+      return checkpoint.auditIssues.some((issue) => issue?.disposition === "repaired")
         ? "已完成必要修正"
         : "无需修正";
     }
     case "delivery": {
       if (step.status !== "completed" || !project) return undefined;
-      return `${project.features?.length ?? 0} 个模块、${project.requirements?.length ?? 0} 条需求已保存`;
+      return `${array(project.features).length} 个模块、${array(project.requirements).length} 条需求已保存`;
     }
     default:
       return undefined;

@@ -16,9 +16,13 @@ describe('需求细化数据契约', () => {
     expect(displayProgress(42.85714285714286)).toBe(43);
   });
   it('执行阶段根据已确认检查点显示简短产出摘要',()=>{
-    const task={status:'running',project:{sourceDocuments:[{fileId:'D-1'}],sourceUnits:[{id:'E-1'},{id:'E-2'}],features:[],requirements:[]},checkpoint:{detailedFeatureIds:['F-1'],auditIssues:[],boundaryUnified:[{id:'F-1'},{id:'F-2'}],detailResults:{'F-1':{requirements:[{id:'R-1'},{id:'R-2'}],clarifications:[]}}}} as unknown as AnalysisTask;
+    const task={status:'running',project:{sourceDocuments:[{fileId:'D-1'}],sourceUnits:[{id:'E-1'},{id:'E-2'}],features:[],requirements:[]},checkpoint:{detailedFeatureIds:['F-1'],auditIssues:[],materializedFeatureIds:['F-1','F-2'],detailResults:{'F-1':{requirements:[{id:'R-1'},{id:'R-2'}],clarifications:[]}}}} as unknown as AnalysisTask;
     expect(stepOutputSummary(task,{id:'inventory',name:'原文建账',note:'',status:'completed'})).toBe('读取 1 个文件，建立 2 个原文片段');
+    expect(stepOutputSummary(task,{id:'unify',name:'功能清单整理',note:'',status:'running'})).toBe('已整理 2 个功能模块');
+    expect(stepOutputSummary(task,{id:'unify',name:'功能清单整理',note:'',status:'completed'})).toBe('整理为 2 个功能模块');
     expect(stepOutputSummary(task,{id:'details',name:'逐功能细化',note:'',status:'running'})).toBe('已细化 1/2 个模块，共 2 条需求');
+    const auditing={...task,checkpoint:{...task.checkpoint,auditedFeatureIds:undefined,auditWorkStates:{'F-1':{state:'succeeded',inputHash:'x',attempts:1,updatedAt:1},'F-2':{state:'running',inputHash:'y',attempts:1,updatedAt:1}}}} as AnalysisTask;
+    expect(stepOutputSummary(auditing,{id:'audit',name:'产物依据核查',note:'',status:'running'})).toBe('已核查 1/2 个功能模块');
     expect(stepOutputSummary(task,{id:'repair',name:'有据修正',note:'',status:'completed'})).toBe('无需修正');
     expect(stepOutputSummary(task,{id:'delivery',name:'结果发布',note:'',status:'pending'})).toBeUndefined();
     const html=renderToStaticMarkup(React.createElement(Progress,{task:{...task,progress:50,steps:[{id:'details',name:'逐功能细化',note:'已细化 1/2 个功能',status:'running'}]} as AnalysisTask,now:3000}));

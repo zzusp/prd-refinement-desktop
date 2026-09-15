@@ -219,8 +219,12 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
       return count ? `识别出 ${count} 个功能候选` : undefined;
     }
     case "unify": {
-      const count = array(checkpoint?.boundaryUnified).length;
-      return count ? `整理为 ${count} 个功能模块` : undefined;
+      const count = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds));
+      if (!count) return undefined;
+      return step.status === "running"
+        ? `已整理 ${count} 个功能模块`
+        : `整理为 ${count} 个功能模块`;
     }
     case "details": {
       const results = checkpoint?.detailResults && typeof checkpoint.detailResults === "object"
@@ -231,14 +235,25 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
         results.flatMap((result) => array(result.requirements).map((item) => item?.id)),
       );
       if (!features) return undefined;
-      const total = array(checkpoint?.boundaryUnified).length || undefined;
+      const total = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds))
+        || undefined;
       return step.status === "running" && total
         ? `已细化 ${features}/${total} 个模块，共 ${requirements} 条需求`
         : `${features} 个模块，共 ${requirements} 条需求`;
     }
     case "audit": {
-      const count = uniqueCount(array(checkpoint?.auditedFeatureIds));
-      return count ? `已核查 ${count} 个功能模块` : undefined;
+      const audited = uniqueCount(array(checkpoint?.auditedFeatureIds));
+      const succeeded = checkpoint?.auditWorkStates && typeof checkpoint.auditWorkStates === "object"
+        ? Object.values(checkpoint.auditWorkStates).filter((work) => work?.state === "succeeded").length
+        : 0;
+      const count = Math.max(audited, succeeded);
+      if (!count) return undefined;
+      const total = array(checkpoint?.boundaryUnified).length
+        || uniqueCount(array(checkpoint?.materializedFeatureIds));
+      return step.status === "running" && total
+        ? `已核查 ${count}/${total} 个功能模块`
+        : `已核查 ${count} 个功能模块`;
     }
     case "repair": {
       if (step.status !== "completed" || !Array.isArray(checkpoint?.auditIssues)) return undefined;

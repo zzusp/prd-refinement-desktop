@@ -1698,15 +1698,20 @@ function Results({
   onRecover: (action: "retry" | "restart") => void;
   now: number;
 }) {
-  const tabs: [ResultTab, string][] = [
-      ["features", "功能与需求"],
-      ["requirements", "全部需求"],
+  const tabs: [ResultTab, string, number?][] = [
+      [
+        "features",
+        "功能与需求",
+        project.features.filter((feature) => feature.kind !== "constraint")
+          .length,
+      ],
+      ["requirements", "全部需求", project.requirements.length],
       ["execution", "执行记录"],
     ];
   return (
     <section className="result-workspace">
       <nav className="result-tabs" aria-label="任务结果视图">
-        {tabs.map(([id, label]) => (
+        {tabs.map(([id, label, count]) => (
           <button
             aria-pressed={tab === id}
             className={tab === id ? "active" : ""}
@@ -1717,6 +1722,7 @@ function Results({
             key={id}
           >
             {label}
+            {count !== undefined && <b className="tab-count">{count}</b>}
           </button>
         ))}
       </nav>
@@ -1948,7 +1954,7 @@ function FeatureList({
     }
   }
   return (
-    <Collection title="功能与需求" count={rows.length}>
+    <Collection title="功能与需求" count={rows.length} hideHeader>
       <ListControls
         q={q}
         filter={filter}
@@ -2117,6 +2123,7 @@ function RequirementList({
     <Collection
       title={feature ? `需求明细 · ${featureTitle(p, feature)}` : "全部需求"}
       count={rows.length}
+      hideHeader={!feature}
     >
       {feature && (
         <button className="text-action clear-feature" onClick={onClearFeature}>
@@ -2309,19 +2316,23 @@ function Pagination({
 function Collection({
   title,
   count,
+  hideHeader = false,
   children,
 }: {
   title: string;
   count: number;
+  hideHeader?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section className="collection result">
-      <div className="collection-head">
-        <h2>
-          {title} <b>{count}</b>
-        </h2>
-      </div>
+      {!hideHeader && (
+        <div className="collection-head">
+          <h2>
+            {title} <b>{count}</b>
+          </h2>
+        </div>
+      )}
       {children}
     </section>
   );

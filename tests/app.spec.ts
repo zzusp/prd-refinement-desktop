@@ -152,6 +152,9 @@ describe('需求细化数据契约', () => {
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
     expect(html).toContain('全部需求');
+    expect(html.match(/class="tab-count"/g)).toHaveLength(2);
+    expect(html.match(/class="tab-count">1<\/b>/g)).toHaveLength(2);
+    expect(html).not.toContain('class="collection-head"');
     expect(html).not.toContain('待处理事项');
     expect(html).toContain('执行记录');
     expect(html).not.toContain('生成交付包');
@@ -190,6 +193,7 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('需求内容待读取');
     expect(html).not.toContain('检查状态');
     expect(html).not.toContain('检查通过');
+    expect(html).not.toContain('class="collection-head"');
   });
 });
 it('需求只显示短文本、模块和原文，不生成多字段规格',()=>{

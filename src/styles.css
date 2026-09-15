@@ -79,3 +79,4 @@ textarea:focus-visible{outline:2px solid #65a8ce;outline-offset:2px}
 .row-select input{margin:0}
 
 body{min-width:0}
+.result-tabs .tab-count{display:inline-grid;min-width:18px;height:18px;margin-left:6px;padding:0 5px;place-items:center;border-radius:9px;background:#e8eef2;color:#536672;font:700 11px "Segoe UI",sans-serif;line-height:18px}.result-tabs button.active .tab-count{background:#dceef7;color:var(--blue)}

@@ -1587,7 +1587,6 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
               <i>{s.status === "completed" ? <CheckCircle2 /> : i + 1}</i>
               <div>
                 <strong>{s.name}</strong>
-                {output && <small className="step-output">产出：{output}</small>}
                 <small>
                   {stepDisplayNote(s.note)}
                   {(s.runs ?? 0) > 0 ? `；累计业务调用 ${s.runs} 次` : ""}
@@ -1614,6 +1613,12 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
                     </small>
                   )}
                 </div>
+                {output && (
+                  <small className={`step-output ${s.status === "running" ? "current" : "final"}`}>
+                    <b>{s.status === "running" ? "当前产出" : "产出"}</b>
+                    <span>{output}</span>
+                  </small>
+                )}
               </div>
               <span>
                 {s.status === "running"

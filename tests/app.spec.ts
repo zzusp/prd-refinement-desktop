@@ -22,7 +22,9 @@ describe('需求细化数据契约', () => {
     expect(stepOutputSummary(task,{id:'repair',name:'有据修正',note:'',status:'completed'})).toBe('无需修正');
     expect(stepOutputSummary(task,{id:'delivery',name:'结果发布',note:'',status:'pending'})).toBeUndefined();
     const html=renderToStaticMarkup(React.createElement(Progress,{task:{...task,progress:50,steps:[{id:'details',name:'逐功能细化',note:'已细化 1/2 个功能',status:'running'}]} as AnalysisTask,now:3000}));
-    expect(html).toContain('产出：已细化 1/2 个模块，共 2 条需求');
+    expect(html).toContain('step-output current');
+    expect(html).toContain('<b>当前产出</b><span>已细化 1/2 个模块，共 2 条需求</span>');
+    expect(html.indexOf('当前产出')).toBeGreaterThan(html.indexOf('复杂功能细化'));
     const transient={...task,checkpoint:{...task.checkpoint,featureCandidateBatches:[null],detailResults:{'F-1':null}},project:{...task.project,sourceUnits:null}} as unknown as AnalysisTask;
     expect(()=>stepOutputSummary(transient,{id:'candidates',name:'功能候选识别',note:'',status:'running'})).not.toThrow();
     expect(()=>stepOutputSummary(transient,{id:'details',name:'逐功能细化',note:'',status:'running'})).not.toThrow();

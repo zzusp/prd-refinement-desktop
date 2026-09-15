@@ -54,6 +54,9 @@ describe('需求细化数据契约', () => {
     expect(progress).toContain('只修订边界或分类问题');
     expect(progress).toContain('gpt-5.6-terra');
     expect(progress).toContain('推理 高');
+    expect(progress).toContain('class="step-heading"');
+    expect(progress).toContain('class="step-duration"');
+    expect(progress).toContain('已执行 2 秒');
     expect(cost).toContain('gpt-5.6-luna');
     expect(cost).toContain('推理深度');
     expect(cost).toContain('<td>低</td>');

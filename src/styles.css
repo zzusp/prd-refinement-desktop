@@ -80,3 +80,4 @@ textarea:focus-visible{outline:2px solid #65a8ce;outline-offset:2px}
 
 body{min-width:0}
 .result-tabs .tab-count{display:inline-grid;min-width:18px;height:18px;margin-left:6px;padding:0 5px;place-items:center;border-radius:9px;background:#e8eef2;color:#536672;font:700 11px "Segoe UI",sans-serif;line-height:18px}.result-tabs button.active .tab-count{background:#dceef7;color:var(--blue)}
+.step{grid-template-columns:36px minmax(0,1fr)}.step-main{min-width:0}.step-heading{display:flex;align-items:baseline;justify-content:space-between;gap:20px}.step-heading>strong{min-width:0}.step-heading .step-duration{flex:none;color:var(--muted);font-size:12px;font-weight:400;text-align:right}.step-runtime em{text-align:right}.step.running .step-duration{color:var(--blue);font-weight:700}

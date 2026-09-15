@@ -1623,8 +1623,17 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
           return (
             <div className={`step ${s.status}`} key={s.id}>
               <i>{s.status === "completed" ? <CheckCircle2 /> : i + 1}</i>
-              <div>
-                <strong>{s.name}</strong>
+              <div className="step-main">
+                <div className="step-heading">
+                  <strong>{s.name}</strong>
+                  <span className="step-duration">
+                    {s.status === "running"
+                      ? `已执行 ${elapsed(0, total)}`
+                      : s.status === "completed"
+                        ? `累计 ${elapsed(0, total)}`
+                        : "等待执行"}
+                  </span>
+                </div>
                 <small>
                   {stepDisplayNote(s.note)}
                   {(s.runs ?? 0) > 0 ? `；累计业务调用 ${s.runs} 次` : ""}
@@ -1658,13 +1667,6 @@ export function Progress({ task, now }: { task: AnalysisTask; now: number }) {
                   </small>
                 )}
               </div>
-              <span>
-                {s.status === "running"
-                  ? `已执行 ${elapsed(0, total)}`
-                  : s.status === "completed"
-                    ? `累计 ${elapsed(0, total)}`
-                    : "等待执行"}
-              </span>
             </div>
           );
         })}

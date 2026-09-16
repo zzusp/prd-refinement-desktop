@@ -11,6 +11,7 @@ if (!app.includes('aria-label')) violations.push('关键结构缺少 aria-label'
 if (!css.includes('padding:0 26px')) violations.push('统一顶部布局的左右间距丢失');
 if (app.includes('platform-macos') || css.includes('window-controls-safe-left')) violations.push('顶部布局不应按操作系统分叉');
 if (!app.includes('网络代理') || !app.includes('proxyUrl')) violations.push('Runtime 代理配置入口缺失');
+if (!app.includes('当前安装版本') || !app.includes('检查更新')) violations.push('应用版本或更新检查入口缺失');
 if (app.includes('依次验证当前配置的节点模型')) violations.push('Runtime 连接检测不应逐节点串行探测');
 if (/selectedProposalIds|generateResolutionProposals|acceptedProposals|待处理事项|建议方案/.test(app)) violations.push('清单页面不应包含业务待处理事项或建议流程');
 if (app.includes('ResultIssues') || app.includes('清单校验明细') || app.includes('平台检查记录')) violations.push('用户结果页不得展示平台内部校验过程');

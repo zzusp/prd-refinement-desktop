@@ -12,6 +12,7 @@ import { packageQuality, writeAgentPackage } from './export-agent-package.js';
 import { AnalysisTaskScheduler, CURRENT_PIPELINE_VERSION } from './scheduler-v2.js';
 import { MaterialBundleStore } from './material-bundle.js';
 import type { MaterialAddition, MaterialFilePatch, MaterialQuery } from '../src/material-types.js';
+import { checkForAppUpdate, RELEASES_URL } from './app-update.js';
 
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -106,6 +107,11 @@ if (ownsInstance) app.whenReady().then(async () => {
     const root=task.rootTaskId??task.id,latest=scheduler.list().filter(item=>(item.rootTaskId??item.id)===root&&item.resultVersion!==undefined).sort((a,b)=>(b.resultVersion??0)-(a.resultVersion??0))[0];
     if(!latest||latest.id!==task.id)throw new Error(`结果已更新到第 ${latest?.resultVersion??resultVersion} 版，请在最新版上准备资料`);
     return materials.prepareAdjustment(task.id,resultVersion,task.project);
+  });
+  ipcMain.handle('app:version', () => ({ currentVersion: app.getVersion() }));
+  ipcMain.handle('app:check-update', () => checkForAppUpdate(app.getVersion()));
+  ipcMain.handle('app:open-release', async () => {
+    await shell.openExternal(RELEASES_URL);
   });
   ipcMain.handle('projects:list', async () => {
     const files = (await readdir(dataRoot())).filter((item) => item.endsWith('.json'));

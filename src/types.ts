@@ -455,6 +455,17 @@ export interface AnalysisTask {
   audit?: unknown;
 }
 
+export interface AppVersionInfo {
+  currentVersion: string;
+}
+
+export interface AppUpdateResult extends AppVersionInfo {
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  publishedAt: string;
+}
+
 declare global {
   interface Window {
     prdApp: {
@@ -462,6 +473,9 @@ declare global {
       importPrd(file?: File): Promise<PrdProject | null>;
       loadProjects(): Promise<PrdProject[]>;
       saveProject(project: PrdProject): Promise<void>;
+      getAppVersion(): Promise<AppVersionInfo>;
+      checkAppUpdate(): Promise<AppUpdateResult>;
+      openAppRelease(): Promise<void>;
       inspectRuntime(config?: RuntimeConfig): Promise<RuntimeStatus>;
       prepareResult(project: PrdProject): Promise<string>;
       openResultDirectory(projectId: string): Promise<ArtifactOpenResult>;

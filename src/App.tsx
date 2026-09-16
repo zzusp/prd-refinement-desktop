@@ -1822,47 +1822,35 @@ function featureScope(
 }
 function ScopeToolbar({
   selected,
-  pageIds,
-  allIds,
   busy,
   message,
-  onSelected,
+  onClear,
   onApply,
 }: {
   selected: string[];
-  pageIds: string[];
-  allIds: string[];
   busy: boolean;
   message: string;
-  onSelected: (ids: string[]) => void;
+  onClear: () => void;
   onApply: (scope: "current" | "excluded") => void;
 }) {
-  const hasSelection = selected.length > 0;
+  if (!selected.length && !message) return null;
   return (
-    <div className={`scope-toolbar${hasSelection ? " has-selection" : ""}`}>
+    <div className={`scope-toolbar${selected.length ? " has-selection" : " is-feedback"}`}>
       <div className="scope-selection-summary" aria-live="polite">
         <b>{selected.length}</b>
         <div>
-          <strong>{hasSelection ? "项已加入批量操作" : "选择要调整的条目"}</strong>
-          <span>{hasSelection ? `当前筛选共 ${allIds.length} 项，可继续勾选` : "勾选只用于本次操作，不会立即更改本期范围。"}</span>
+          <strong>{selected.length ? `已选 ${selected.length} 项` : "操作提示"}</strong>
+          <span>{selected.length ? "批量操作只影响当前选择。" : message}</span>
         </div>
       </div>
-      <div className="scope-select-actions" aria-label="选择范围">
-        <span className="scope-action-label">选择范围</span>
+      {selected.length > 0 && <div className="scope-bulk-actions" aria-label="批量操作">
         <div>
-          <button className="text-action" disabled={!pageIds.length} onClick={() => onSelected([...new Set([...selected, ...pageIds])])}>全选本页</button>
-          <button className="text-action" disabled={!allIds.length} onClick={() => onSelected(allIds)}>筛选结果全部（{allIds.length}）</button>
+          <button className="secondary" disabled={busy} onClick={() => onApply("excluded")}>标记本期不做</button>
+          <button className="secondary" disabled={busy} onClick={() => onApply("current")}>恢复本期</button>
+          <button className="text-action" disabled={busy} onClick={onClear}>清除选择</button>
         </div>
-      </div>
-      <div className="scope-bulk-actions" aria-label="批量操作">
-        <span className="scope-action-label">批量操作</span>
-        <div>
-          <button className="secondary" disabled={!hasSelection || busy} onClick={() => onApply("excluded")}>标记本期不做</button>
-          <button className="secondary" disabled={!hasSelection || busy} onClick={() => onApply("current")}>恢复本期</button>
-          <button className="text-action" disabled={!hasSelection || busy} onClick={() => onSelected([])}>清除选择</button>
-        </div>
-      </div>
-      {message && <p role="status">{message}</p>}
+      </div>}
+      {message && selected.length > 0 && <p role="status">{message}</p>}
     </div>
   );
 }
@@ -1941,14 +1929,16 @@ function FeatureList({
         filter={filter}
         onChange={changeView}
         label="搜索功能"
+        pageIds={visible.map((item) => item.id)}
+        allIds={rows.map((item) => item.id)}
+        selected={selected}
+        onSelected={setSelected}
       />
       <ScopeToolbar
         selected={selected}
-        pageIds={visible.map((item) => item.id)}
-        allIds={rows.map((item) => item.id)}
         busy={busy}
         message={message}
-        onSelected={setSelected}
+        onClear={() => setSelected([])}
         onApply={(scope) => void apply(scope)}
       />
       <div className="data-table features scope-table">
@@ -2106,30 +2096,22 @@ function RequirementList({
       count={rows.length}
       hideHeader
     >
-      {feature && (
-        <div className="active-feature-filter" role="status">
-          <span>当前功能</span>
-          <strong>{featureTitle(p, feature)}</strong>
-          <b>{rows.length} 条需求</b>
-          <button className="text-action" onClick={onClearFeature}>
-            <X />
-            清除筛选
-          </button>
-        </div>
-      )}
       <ListControls
         q={q}
         filter={filter}
         onChange={changeView}
         label="搜索需求"
+        pageIds={visible.map((item) => item.id)}
+        allIds={rows.map((item) => item.id)}
+        selected={selected}
+        onSelected={setSelected}
+        context={feature ? { label: featureTitle(p, feature), count: rows.length, onClear: onClearFeature } : undefined}
       />
       <ScopeToolbar
         selected={selected}
-        pageIds={visible.map((item) => item.id)}
-        allIds={rows.map((item) => item.id)}
         busy={busy}
         message={message}
-        onSelected={setSelected}
+        onClear={() => setSelected([])}
         onApply={(scope) => void apply(scope)}
       />
       <div className="data-table requirements scope-table">
@@ -2214,53 +2196,43 @@ function ListControls({
   filter,
   onChange,
   label,
+  pageIds,
+  allIds,
+  selected,
+  onSelected,
+  context,
 }: {
   q: string;
   filter: ScopeFilter;
   onChange: (q: string, filter: ScopeFilter) => void;
   label: string;
+  pageIds: string[];
+  allIds: string[];
+  selected: string[];
+  onSelected: (ids: string[]) => void;
+  context?: { label: string; count: number; onClear: () => void };
 }) {
   return (
     <div className="list-controls">
-      <label className="search">
-        <Search />
-        <input
-          value={q}
-          onChange={(event) => onChange(event.target.value, filter)}
-          aria-label={label}
-          placeholder={`${label}名称或内容`}
-        />
-        {q && (
-          <button
-            aria-label={`清空${label}`}
-            onClick={(event) => {
-              onChange("", filter);
-              event.currentTarget.parentElement
-                ?.querySelector("input")
-                ?.focus();
-            }}
-          >
-            <X />
-          </button>
-        )}
-      </label>
-      <div className="scope-filters" aria-label="本期范围筛选">
-        {(
-          [
-            ["all", "全部"],
-            ["current", "本期"],
-            ["excluded", "本期不做"],
-          ] as Array<[ScopeFilter, string]>
-        ).map(([id, text]) => (
-          <button
-            key={id}
-            aria-pressed={filter === id}
-            className={filter === id ? "active" : ""}
-            onClick={() => onChange(q, id)}
-          >
-            {text}
-          </button>
-        ))}
+      <div className="list-filter-leading">
+        {context && <div className="feature-filter-chip" role="status" title={context.label}>
+          <span>功能</span><strong>{context.label}</strong><b>{context.count} 条</b>
+          <button aria-label={`清除功能筛选：${context.label}`} onClick={context.onClear}><X /></button>
+        </div>}
+        <label className="search">
+          <Search />
+          <input value={q} onChange={(event) => onChange(event.target.value, filter)} aria-label={label} placeholder={`${label}名称或内容`} />
+          {q && <button aria-label={`清空${label}`} onClick={(event) => { onChange("", filter); event.currentTarget.parentElement?.querySelector("input")?.focus(); }}><X /></button>}
+        </label>
+      </div>
+      <div className="list-control-actions">
+        <div className="selection-shortcuts" aria-label="选择范围">
+          <button disabled={!pageIds.length} onClick={() => onSelected([...new Set([...selected, ...pageIds])])}>全选本页</button>
+          <button disabled={!allIds.length} onClick={() => onSelected(allIds)}>选择筛选结果（{allIds.length}）</button>
+        </div>
+        <div className="scope-filters" aria-label="本期范围筛选">
+          {([['all','全部'],['current','本期'],['excluded','本期不做']] as Array<[ScopeFilter,string]>).map(([id,text]) => <button key={id} aria-pressed={filter===id} className={filter===id?'active':''} onClick={() => onChange(q,id)}>{text}</button>)}
+        </div>
       </div>
     </div>
   );

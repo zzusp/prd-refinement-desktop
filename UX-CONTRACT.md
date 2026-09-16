@@ -27,7 +27,7 @@
 | File upload | `src/MaterialWorkspace.tsx` | `electron/material-bundle.ts` | 主 PRD、补充文件和目录 | component + E2E |
 | Analysis input | `src/MaterialWorkspace.tsx` 的“补充说明与调整”与任务页 `TaskFeedback` | `electron/material-bundle.ts`、`electron/scheduler-v2.ts` | 首次分析、结果调整 | unit + E2E |
 | Search | `src/App.tsx` 的 `RequirementTable` | `src/App.tsx` | 需求明细本地过滤 | keyboard + E2E |
-| Table Selection | `src/App.tsx` 的 `ScopeToolbar` | `docs/spec/task-scope-delivery-workspace.md` | 本页、当前筛选结果 | component + E2E |
+| Table Selection | `src/App.tsx` 的 `ListControls` 与 `ScopeToolbar` | `docs/spec/task-scope-delivery-workspace.md` | 本页、当前筛选结果 | component + E2E |
 | Select/Listbox | native | `src/styles.css` | Runtime 配置、资料包恢复、资料用途和来源文件 | keyboard + E2E |
 | Toast | 暂不适用 | 本契约 | 后续统一实现 | n/a |
 | Scrollbar | `src/styles.css` | DESIGN.md | panel scroll | browser inspection |
@@ -82,6 +82,8 @@
 
 
 完成结果默认进入功能与需求，执行中默认进入执行记录。来源处置保留在只读结果快照。范围状态持久化到结果版本，列表复选框和筛选仅暂存于页面；筛选变化清空隐藏选择。需求详情抽屉为非模态补充阅读区域，支持 Escape 关闭。
+
+列表的当前功能、内容搜索、本期范围和选择范围共用一条筛选控制栏；批量操作栏仅在已有选择或显示操作反馈时出现，避免形成三条常驻筛选层级。
 
 ## 资料包工作流（2026-09-10）
 

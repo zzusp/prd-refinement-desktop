@@ -18,5 +18,6 @@ if (app.includes('ResultIssues') || app.includes('清单校验明细') || app.in
 if (!app.includes('thead-columns requirement-columns') || !app.includes('thead-columns feature-columns')) violations.push('结果表头必须与数据行共用列轨道');
 if (!app.includes('TaskMaterials') || !app.includes('任务固定输入')) violations.push('任务详情资料包视图缺失');
 if (!app.includes('更新资料并重新分析') || !materials.includes('startMaterialAdjustment')) violations.push('调整结果缺少 PRD 与补充资料更新路径');
+if (!materials.includes('当前版本补充资料') || !materials.includes("useState(mode.kind==='adjustment')") || !materials.includes('已带入当前版本的提示词')) violations.push('更新资料页未默认展示当前版本资料与提示词');
 if (violations.length) { console.error(violations.join('\n')); process.exit(1); }
 console.log('UI contract smoke check passed');

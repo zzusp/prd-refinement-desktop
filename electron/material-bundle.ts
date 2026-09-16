@@ -168,7 +168,8 @@ export class MaterialBundleStore {
         }
       }catch(error){await rm(snapshotRoot,{recursive:true,force:true});throw error}
     }
-    return {id:'P-'+randomUUID(),name:b.name,sourceName:primary.logicalPath,sourceHash:index.manifestHash,revision:b.revision,importedAt:new Date().toISOString(),rawText:index.documents.map(d=>d.rawText).join('\n\n'),stage:'inventory',sourceUnits,sourceDocuments:structuredClone(index.documents),materialBundle:{id:b.id,revision:b.revision},inputSnapshotPath:snapshotRoot,rules:[],features:[],requirements:[],clarifications:[]}
+    const view=this.view(b);
+    return {id:'P-'+randomUUID(),name:b.name,sourceName:primary.logicalPath,sourceHash:index.manifestHash,revision:b.revision,importedAt:new Date().toISOString(),rawText:index.documents.map(d=>d.rawText).join('\n\n'),stage:'inventory',sourceUnits,sourceDocuments:structuredClone(index.documents),materialBundle:{id:b.id,revision:b.revision},materialSnapshot:{name:view.name,revision:view.revision,state:view.state,files:view.files,issues:view.issues,updatedAt:view.updatedAt},inputSnapshotPath:snapshotRoot,rules:[],features:[],requirements:[],clarifications:[]}
   }
   async shutdown(){for(const job of this.jobs.values())job.controller.abort(new Error('应用关闭，索引已取消'));await Promise.all(Array.from(this.jobs.values()).map(j=>j.done))}
 }

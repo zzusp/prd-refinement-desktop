@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, stepOutputSummary, TaskFeedback, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
+import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, stepOutputSummary, TaskFeedback, TaskMaterials, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
@@ -41,6 +41,23 @@ describe('需求细化数据契约', () => {
   it('明确区分来源、规则、功能和需求明细', () => {
     const chain = ['SourceUnit', 'RequirementRule', 'Feature', 'RequirementDetail'];
     expect(new Set(chain).size).toBe(4);
+  });
+  it('资料包视图展示任务冻结文件与本次分析输入', () => {
+    const project={id:'P-1',name:'活动需求',sourceName:'prd/main.md',sourceHash:'hash',revision:4,importedAt:'2026-09-16T00:00:00Z',rawText:'规则',stage:'review',materialBundle:{id:'B-1',revision:4},materialSnapshot:{name:'活动资料',revision:4,state:'ready',updatedAt:'2026-09-16T00:00:00Z',issues:[],files:[{id:'F-1',logicalPath:'prd/main.md',role:'primary',revision:1,size:2048,hash:'hash',status:'read',sourceCount:2},{id:'F-2',logicalPath:'history/demo.pdf',role:'historical',revision:1,size:1048576,hash:'hash-2',status:'excluded',exclusionReason:'仅用于版式参考'}]},sourceDocuments:[],sourceUnits:[{id:'S-1',fileId:'F-1',label:'规则',kind:'paragraph',excerpt:'规则',location:'第1段',status:'processed'}],analysisInput:{text:'本期不做导出。',revision:1,submittedAt:'2026-09-16T01:00:00Z',operationId:'OP-1',fingerprint:'fingerprint'},features:[],requirements:[],clarifications:[]} as any;
+    const html=renderToStaticMarkup(React.createElement(TaskMaterials,{project}));
+    expect(html).toContain('活动资料');
+    expect(html).toContain('prd/main.md');
+    expect(html).toContain('历史参考');
+    expect(html).toContain('1.0 MB');
+    expect(html).toContain('本期不做导出。');
+    expect(html).toContain('不受原资料包后续修改影响');
+  });
+  it('旧任务资料包视图明确提示元数据降级', () => {
+    const project={id:'P-old',name:'旧任务',sourceName:'legacy.docx',sourceHash:'hash',revision:1,importedAt:'2026-01-01T00:00:00Z',rawText:'',stage:'review',sourceUnits:[],features:[],requirements:[],clarifications:[]} as any;
+    const html=renderToStaticMarkup(React.createElement(TaskMaterials,{project}));
+    expect(html).toContain('历史任务');
+    expect(html).toContain('legacy.docx');
+    expect(html).toContain('资料快照字段加入之前');
   });
 
   it('执行节点和成本分布显示任务实际模型与推理深度', () => {
@@ -159,8 +176,9 @@ describe('需求细化数据契约', () => {
     const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
     expect(html).toContain('全部需求');
-    expect(html.match(/class="tab-count"/g)).toHaveLength(2);
-    expect(html.match(/class="tab-count">1<\/b>/g)).toHaveLength(2);
+    expect(html).toContain('资料包');
+    expect(html.match(/class="tab-count"/g)).toHaveLength(3);
+    expect(html.match(/class="tab-count">1<\/b>/g)).toHaveLength(3);
     expect(html).not.toContain('class="collection-head"');
     expect(html).not.toContain('待处理事项');
     expect(html).toContain('执行记录');

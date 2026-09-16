@@ -40,6 +40,12 @@ import type {
 } from "./types";
 import { MaterialWorkspace } from "./MaterialWorkspace";
 import {
+  formatMaterialSize,
+  materialFileStateLabels,
+  materialRoleLabels,
+  materialStateLabels,
+} from "./material-presentation";
+import {
   featureTitle,
   readableContext,
   requirementSourceRefs,
@@ -272,7 +278,7 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
   }
 }
 type Page = "tasks" | "upload" | "task" | "settings";
-type ResultTab = "features" | "requirements" | "execution";
+type ResultTab = "features" | "requirements" | "materials" | "execution";
 type AdjustmentRequest = RefinementAdjustmentRequest;
 function taskRootId(task: AnalysisTask) {
   return task.rootTaskId ?? task.id;
@@ -1131,7 +1137,6 @@ function TaskPage({
         onRecover={(action) => void recover(action)}
         now={now}
       />
-      {task.project.analysisInput?.text&&<details className="task-input-summary"><summary>本次分析输入 <span>用户补充 · {task.project.analysisInput.text.length.toLocaleString('zh-CN')} 字</span></summary><div><small>提交于 {new Date(task.project.analysisInput.submittedAt).toLocaleString('zh-CN')} · 已随第 {task.project.analysisInput.revision} 版输入固定</small><pre>{task.project.analysisInput.text}</pre>{task.project.analysisInputApplications?.length?<section className="input-application-list"><h4>平台如何使用这些内容</h4>{task.project.analysisInputApplications.map(item=><article key={item.sourceUnitId}><strong>{item.kind==='business-fact'?'业务补充':item.kind==='scope-decision'?'本期范围':item.kind==='organization'?'整理要求':item.kind==='question'?'待回答问题':'替换口径'}</strong><span>{item.summary}</span><em>{item.status==='pending'?'仍待确认':item.affectedFeatureIds.length?`已应用到 ${item.affectedFeatureIds.length} 个功能`:'已记录'}</em></article>)}</section>:null}</div></details>}
       {detail && (
         <Drawer
           project={task.project}
@@ -1725,6 +1730,11 @@ function Results({
           .length,
       ],
       ["requirements", "全部需求", project.requirements.length],
+      [
+        "materials",
+        "资料包",
+        project.materialSnapshot?.files.length ?? project.sourceDocuments?.length ?? 1,
+      ],
       ["execution", "执行记录"],
     ];
   return (
@@ -1765,10 +1775,108 @@ function Results({
             onDetail={onDetail}
             onScope={onScope}
           />
+        ) : tab === "materials" ? (
+          <TaskMaterials project={project} />
         ) : (
           <ExecutionRecord task={task} now={now} failureAction={failureAction} onRecover={onRecover} />
         )}
       </div>
+    </section>
+  );
+}
+export function TaskMaterials({ project }: { project: PrdProject }) {
+  const sourceDocuments = project.sourceDocuments ?? [];
+  const sourceCounts = new Map<string, number>();
+  for (const unit of project.sourceUnits ?? []) {
+    if (unit.synthetic || !unit.fileId) continue;
+    sourceCounts.set(unit.fileId, (sourceCounts.get(unit.fileId) ?? 0) + 1);
+  }
+  const files = project.materialSnapshot?.files.map((file) => ({
+    id: file.id,
+    logicalPath: file.logicalPath,
+    role: file.role,
+    status: file.status,
+    size: file.size as number | undefined,
+    sourceCount: file.sourceCount ?? sourceCounts.get(file.id),
+    note: file.exclusionReason ?? file.reason,
+  })) ?? sourceDocuments.map((document) => ({
+    id: document.fileId,
+    logicalPath: document.logicalPath,
+    role: document.role,
+    status: "read" as const,
+    size: undefined,
+    sourceCount: sourceCounts.get(document.fileId),
+    note: undefined,
+  }));
+  if (!files.length) {
+    files.push({
+      id: "legacy-primary",
+      logicalPath: project.sourceName,
+      role: "primary",
+      status: "read",
+      size: undefined,
+      sourceCount: project.sourceUnits?.filter((unit) => !unit.synthetic).length,
+      note: undefined,
+    });
+  }
+  const snapshot = project.materialSnapshot;
+  const input = project.analysisInput;
+  const totalSize = snapshot?.files.reduce((sum, file) => sum + file.size, 0);
+  return (
+    <section className="material-snapshot" aria-label="任务资料包">
+      <header className="material-snapshot-intro">
+        <div>
+          <span>任务固定输入</span>
+          <h2>{snapshot?.name ?? project.name}</h2>
+          <p>固定于 {new Date(project.importedAt).toLocaleString("zh-CN")}，不受原资料包后续修改影响。</p>
+        </div>
+        <em>{snapshot ? materialStateLabels[snapshot.state] : "历史任务"}</em>
+      </header>
+      <dl className="material-snapshot-facts">
+        <div><dt>资料版本</dt><dd>v{project.materialBundle?.revision ?? project.revision}</dd></div>
+        <div><dt>文件</dt><dd>{files.length.toLocaleString("zh-CN")} 个</dd></div>
+        <div><dt>内容单元</dt><dd>{Array.from(sourceCounts.values()).reduce((sum, count) => sum + count, 0).toLocaleString("zh-CN")} 条</dd></div>
+        <div><dt>资料大小</dt><dd>{formatMaterialSize(totalSize)}</dd></div>
+      </dl>
+      {!snapshot && (
+        <p className="material-snapshot-note" role="note">
+          此任务创建于资料快照字段加入之前，以下信息来自任务中已冻结的来源文件。
+        </p>
+      )}
+      <div className="material-snapshot-table">
+        <table>
+          <caption className="sr-only">冻结资料文件</caption>
+          <thead><tr><th>文件</th><th>用途</th><th>读取状态</th><th>大小</th><th>内容单元</th></tr></thead>
+          <tbody>{files.map((file) => (
+            <tr key={file.id}>
+              <td><strong>{file.logicalPath}</strong>{file.note && <small>{file.note}</small>}</td>
+              <td>{materialRoleLabels[file.role]}</td>
+              <td><i className={`material-file-state ${file.status}`}>{materialFileStateLabels[file.status]}</i></td>
+              <td>{formatMaterialSize(file.size)}</td>
+              <td>{file.sourceCount === undefined ? "未记录" : `${file.sourceCount.toLocaleString("zh-CN")} 条`}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {!!snapshot?.issues.length && (
+        <section className="material-snapshot-issues" aria-label="资料读取记录">
+          <h3>资料读取记录</h3>
+          {snapshot.issues.map((issue) => <p key={issue.id}>{issue.message}</p>)}
+        </section>
+      )}
+      <section className="material-input-snapshot" aria-label="本次分析输入">
+        <header>
+          <div><h3>本次分析输入</h3><p>与资料一起固定，不随资料包后续编辑。</p></div>
+          <span>{input ? `${input.text.length.toLocaleString("zh-CN")} 字` : "未填写"}</span>
+        </header>
+        {input?.text ? (
+          <>
+            <small>提交于 {new Date(input.submittedAt).toLocaleString("zh-CN")} · 输入 v{input.revision}</small>
+            <pre>{input.text}</pre>
+            {!!project.analysisInputApplications?.length && <section className="input-application-list"><h4>平台如何使用这些内容</h4>{project.analysisInputApplications.map(item=><article key={item.sourceUnitId}><strong>{item.kind==='business-fact'?'业务补充':item.kind==='scope-decision'?'本期范围':item.kind==='organization'?'整理要求':item.kind==='question'?'待回答问题':'替换口径'}</strong><span>{item.summary}</span><em>{item.status==='pending'?'仍待确认':item.affectedFeatureIds.length?`已应用到 ${item.affectedFeatureIds.length} 个功能`:'已记录'}</em></article>)}</section>}
+          </>
+        ) : <p className="material-input-empty">本次分析没有额外补充说明。</p>}
+      </section>
     </section>
   );
 }

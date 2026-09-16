@@ -20,6 +20,14 @@ export interface MaterialBundle {
   analysisDraft?: { text: string; revision: number; updatedAt: string };
   error?: string;
 }
+export interface MaterialBundleSnapshot {
+  name: string;
+  revision: number;
+  state: BundleState;
+  files: MaterialFile[];
+  issues: MaterialIssue[];
+  updatedAt: string;
+}
 export interface MaterialAddition {
   role: MaterialRole; kind: 'files'|'directory'; mount?: string;
 }

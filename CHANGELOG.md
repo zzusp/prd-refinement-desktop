@@ -4,6 +4,19 @@
 
 ## [未发布]
 
+## [0.1.6] - 2026-09-16
+
+### 新增
+
+- 应用顶部显示当前版本，Runtime 配置页支持手动检查 GitHub 最新正式版本。
+- 任务详情新增“资料包”页签，可查看本次分析冻结的 PRD、补充资料和提示词。
+- 调整结果时可复制当前版本资料，更换主 PRD、增删补充文件或目录并完整重新分析；更新页默认展示当前版本资料和提示词。
+
+### 完善
+
+- 结果列表将当前功能筛选、搜索、周期范围与批量操作按层级重新组织，减少重复筛选和视觉拥挤。
+- 批量范围操作栏明确区分当前页选择和当前筛选范围，降低误操作风险。
+
 ## [0.1.5] - 2026-09-15
 
 ### 新增
@@ -60,6 +73,7 @@
 - 完善来源证据绑定、输入预算、审计返工、并发调度和模型用量展示。
 - 统一本地临时产物、验收证据和正式应用数据的目录边界。
 
+[0.1.6]: https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.6
 [0.1.5]: https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tzt-company/prd-refinement-desktop/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tzt-company/prd-refinement-desktop/releases/tag/v0.1.3

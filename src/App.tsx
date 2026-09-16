@@ -26,6 +26,8 @@ import {
 import type {
   AnalysisStep,
   AnalysisTask,
+  AppUpdateResult,
+  AppVersionInfo,
   DeliveryScopeUpdateRequest,
   ModelNodeId,
   ModelProfile,
@@ -338,6 +340,9 @@ export function App() {
     available: false,
     reason: "正在检测",
   });
+  const [appVersion, setAppVersion] = useState<AppVersionInfo>({
+    currentVersion: "—",
+  });
   useEffect(() => {
     if (!window.prdApp) return;
     void Promise.all([
@@ -367,6 +372,9 @@ export function App() {
         );
       }
     });
+  }, []);
+  useEffect(() => {
+    void window.prdApp?.getAppVersion?.().then(setAppVersion).catch(() => undefined);
   }, []);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -459,7 +467,7 @@ export function App() {
     : [];
   return (
     <main className="platform">
-      <TopBar page={page} setPage={setPage} harness={harness} />
+      <TopBar page={page} setPage={setPage} harness={harness} appVersion={appVersion} />
       {page === "tasks" ? (
         <TaskCenter
           tasks={tasks}
@@ -481,7 +489,7 @@ export function App() {
           onBack={() => setPage("tasks")}
         />
       ) : page === "settings" ? (
-        <RuntimeSettings status={harness} onStatus={setHarness} />
+        <RuntimeSettings status={harness} onStatus={setHarness} appVersion={appVersion} />
       ) : active ? (
         <TaskPage
           task={active}
@@ -528,10 +536,12 @@ function TopBar({
   page,
   setPage,
   harness,
+  appVersion,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   harness: RuntimeStatus;
+  appVersion: AppVersionInfo;
 }) {
   const name = harness.adapter === "dsh" ? "DeepSeek Harness" : "Codex CLI";
   const label = harness.routeReady
@@ -561,9 +571,12 @@ function TopBar({
           Runtime 配置
         </button>
       </nav>
-      <div className={harness.routeReady ? "runtime ready" : "runtime"}>
-        <i />
-        <span>{label}</span>
+      <div className="platform-meta">
+        <span className="app-version">v{appVersion.currentVersion}</span>
+        <div className={harness.routeReady ? "runtime ready" : "runtime"}>
+          <i />
+          <span>{label}</span>
+        </div>
       </div>
     </header>
   );
@@ -2353,9 +2366,11 @@ function Drawer({
 function RuntimeSettings({
   status,
   onStatus,
+  appVersion,
 }: {
   status: RuntimeStatus;
   onStatus: (s: RuntimeStatus) => void;
+  appVersion: AppVersionInfo;
 }) {
   const [config, setConfig] = useState<RuntimeConfig>({
     adapter: "codex-oauth",
@@ -2375,6 +2390,9 @@ function RuntimeSettings({
   const [checkedAt, setCheckedAt] = useState<string>();
   const [checkError, setCheckError] = useState("");
   const [lastCheck, setLastCheck] = useState(false);
+  const [updateResult, setUpdateResult] = useState<AppUpdateResult>();
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateError, setUpdateError] = useState("");
   useEffect(() => {
     window.prdApp?.loadRuntimeConfig().then(setConfig);
   }, []);
@@ -2405,6 +2423,25 @@ function RuntimeSettings({
       setCheckError("未能取得检查结果，请重试；下方保留上次结果。");
     } finally {
       setChecking(null);
+    }
+  }
+  async function checkUpdate() {
+    if (updateChecking || !window.prdApp?.checkAppUpdate) return;
+    setUpdateChecking(true);
+    setUpdateError("");
+    try {
+      setUpdateResult(await window.prdApp.checkAppUpdate());
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : "更新检查失败，请稍后重试");
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+  async function openRelease() {
+    try {
+      await window.prdApp.openAppRelease();
+    } catch {
+      setUpdateError("无法打开发布页面，请稍后重试");
     }
   }
   function changeAdapter(adapter: RuntimeConfig["adapter"]) {
@@ -2466,6 +2503,44 @@ function RuntimeSettings({
           <p>选择执行适配器、模型与推理深度；新任务会固化当前配置。</p>
         </div>
       </div>
+      <section className="settings-card app-update-card">
+        <header>
+          <PackageOpen />
+          <div>
+            <h2>应用版本</h2>
+            <p>当前安装版本 v{appVersion.currentVersion}</p>
+          </div>
+          <div className="app-update-actions">
+            {updateResult?.updateAvailable && (
+              <button className="primary" onClick={openRelease}>
+                查看 v{updateResult.latestVersion}
+              </button>
+            )}
+            <button
+              className="secondary app-update-check"
+              aria-busy={updateChecking}
+              disabled={updateChecking || appVersion.currentVersion === "—"}
+              onClick={checkUpdate}
+            >
+              <RotateCw className={updateChecking ? "runtime-spinner" : ""} />
+              {updateChecking ? "检查中" : "检查更新"}
+            </button>
+          </div>
+        </header>
+        <div
+          className={`app-update-status ${updateError ? "has-error" : updateResult?.updateAvailable ? "has-update" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {updateError
+            ? updateError
+            : updateResult?.updateAvailable
+              ? `发现新版本 v${updateResult.latestVersion}，可前往正式发布页下载安装。`
+              : updateResult
+                ? `已是最新版本（v${updateResult.latestVersion}）`
+                : "不会后台下载；仅在你点击时检查正式 GitHub Release。"}
+        </div>
+      </section>
       <section className="settings-card">
         <header>
           <SlidersHorizontal />

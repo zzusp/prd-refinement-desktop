@@ -14,5 +14,6 @@ if (app.includes('依次验证当前配置的节点模型')) violations.push('Ru
 if (/selectedProposalIds|generateResolutionProposals|acceptedProposals|待处理事项|建议方案/.test(app)) violations.push('清单页面不应包含业务待处理事项或建议流程');
 if (app.includes('ResultIssues') || app.includes('清单校验明细') || app.includes('平台检查记录')) violations.push('用户结果页不得展示平台内部校验过程');
 if (!app.includes('thead-columns requirement-columns') || !app.includes('thead-columns feature-columns')) violations.push('结果表头必须与数据行共用列轨道');
+if (!app.includes('TaskMaterials') || !app.includes('任务固定输入')) violations.push('任务详情资料包视图缺失');
 if (violations.length) { console.error(violations.join('\n')); process.exit(1); }
 console.log('UI contract smoke check passed');

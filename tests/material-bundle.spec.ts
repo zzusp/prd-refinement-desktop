@@ -14,7 +14,7 @@ const index=async(store:MaterialBundleStore,id:string)=>{await store.index(id);r
 describe('资料包快照、索引和恢复',()=>{
  it('主文档和补充文件按身份与位置检索，原文件变动不影响固定快照',async()=>{
   const {root,store,bundle}=await setup();const main=await file(root,'main.md','# 订单\n\n订单编号必填');await addPrimary(store,bundle.id,main);await store.add(bundle.id,[await file(root,'more.txt','退款金额不能超过订单金额')],{kind:'files',role:'supplement'});
-  expect((await index(store,bundle.id)).state).toBe('ready');const p=await store.project(bundle.id);expect(p.sourceDocuments).toHaveLength(2);expect(new Set(p.sourceUnits.map(u=>u.id)).size).toBe(p.sourceUnits.length);expect(p.sourceUnits.every(u=>u.location.includes(u.logicalPath!))).toBe(true);
+  expect((await index(store,bundle.id)).state).toBe('ready');const p=await store.project(bundle.id);expect(p.sourceDocuments).toHaveLength(2);expect(p.materialSnapshot).toMatchObject({revision:3,state:'ready',files:[{logicalPath:'main.md',role:'primary',status:'read'},{logicalPath:'more.txt',role:'supplement',status:'read'}]});expect(new Set(p.sourceUnits.map(u=>u.id)).size).toBe(p.sourceUnits.length);expect(p.sourceUnits.every(u=>u.location.includes(u.logicalPath!))).toBe(true);
   await writeFile(main,'改写源文件');expect((await store.project(bundle.id)).rawText).toContain('订单编号必填');const q=await store.query(bundle.id,{query:'退款'});expect(q.total).toBe(1);expect(q.items[0].sourceRole).toBe('supplement');await expect(store.read(bundle.id,['S-not-owned'])).rejects.toThrow();
  });
  it('任务输入快照在资料包删除后仍保留文件和图片引用',async()=>{

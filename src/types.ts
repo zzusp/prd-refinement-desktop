@@ -161,6 +161,8 @@ export interface DeliveryAssessment {
 
 export interface PrdProject {
   materialBundle?: { id: string; revision: number };
+  /** 任务启动时固定的资料包元数据；不随原资料包后续修改。 */
+  materialSnapshot?: import('./material-types.js').MaterialBundleSnapshot;
   /** 分析任务固化的自包含输入目录。 */
   inputSnapshotPath?: string;
   sourceDocuments?: Array<{fileId: string; revision: number; logicalPath: string; role: import('./material-types.js').MaterialRole; rawText: string}>;

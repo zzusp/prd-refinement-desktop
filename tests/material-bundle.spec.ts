@@ -3,6 +3,7 @@ import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promise
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { MaterialBundleStore } from '../electron/material-bundle';
+import type { PrdProject } from '../src/types';
 import { createTestWorkspace } from './test-workspace';
 vi.mock('node:fs/promises',async()=>{const actual=await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');return {...actual,rename:vi.fn(actual.rename)}});
 const roots:string[]=[];
@@ -23,6 +24,16 @@ describe('资料包快照、索引和恢复',()=>{
   const snapshot=path.join(root,'tasks','input-snapshot'),project=await store.project(bundle.id,snapshot),asset=project.sourceUnits.find(unit=>unit.asset)?.asset;
   expect(asset?.path.startsWith(snapshot)).toBe(true);expect(await readFile(path.join(snapshot,'input','main.html'),'utf8')).toContain('筛选规则');expect(asset&&await readFile(asset.path)).toBeTruthy();
   await store.deleteBundle(bundle.id);await access(path.join(snapshot,'input','main.html'));await access(asset!.path);expect(project.sourceUnits.find(unit=>unit.asset)?.asset?.path).toBe(asset!.path);
+ });
+ it('从任务冻结快照创建可编辑调整资料且不依赖原资料包',async()=>{
+  const {root,store,bundle}=await setup();await addPrimary(store,bundle.id,await file(root,'main.md','# 订单\n\n支持提交订单'));await store.add(bundle.id,[await file(root,'docs/rule.txt','订单金额必须大于零')],{kind:'files',role:'supplement',mount:'规则'});await store.saveAnalysisDraft(bundle.id,'按业务阶段拆分',0);await index(store,bundle.id);
+  const snapshot=path.join(root,'tasks','input-snapshot'),project=await store.project(bundle.id,snapshot);project.analysisInput={text:'按业务阶段拆分',revision:1,submittedAt:'now',operationId:'OP-BASE',fingerprint:'input'};await store.deleteBundle(bundle.id);
+  const prepared=await store.prepareAdjustment('T-BASE',2,project),again=await store.prepareAdjustment('T-BASE',2,project);
+  expect(again.id).toBe(prepared.id);expect(prepared.adjustmentBase).toEqual({taskId:'T-BASE',resultVersion:2});expect(prepared.analysisDraft?.text).toBe('按业务阶段拆分');expect(prepared.files.map(item=>[item.logicalPath,item.role])).toEqual([['main.md','primary'],['规则/rule.txt','supplement']]);expect((await readFile(path.join(root,'store',prepared.id,'blobs',prepared.files[0].hash+'.md'),'utf8'))).toContain('支持提交订单');
+ });
+ it('旧任务没有冻结资料时仍可创建空草稿并重新选择主 PRD',async()=>{
+  const {store}=await setup(),project={id:'P',name:'旧任务',sourceName:'old.md',sourceHash:'x',revision:1,importedAt:'now',rawText:'旧内容',stage:'review',sourceUnits:[],features:[],requirements:[],clarifications:[]} as PrdProject;
+  const prepared=await store.prepareAdjustment('T-OLD',1,project);expect(prepared.files).toEqual([]);expect(prepared.adjustmentBase).toEqual({taskId:'T-OLD',resultVersion:1});
  });
  it('只处理用户上传的文件，不根据文档引用判断缺件',async()=>{
   const {root,store,bundle}=await setup();await addPrimary(store,bundle.id,await file(root,'main.html','<h1>订单</h1><p>点击筛选</p><img src="assets/filter.svg">'));

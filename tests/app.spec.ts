@@ -111,10 +111,11 @@ describe('需求细化数据契约', () => {
 
   it('结果页使用一个任务级自然语言调整入口',()=>{
     const task={id:'T-1',resultVersion:3,status:'completed',progress:100,steps:[],adjustment:{feedback:'统一含税',results:[{operationId:'OP-1',status:'applied',featureIds:['F-1'],clarificationIds:[],detail:'退款金额已统一为含税口径。'},{operationId:'OP-2',status:'needs-confirmation',featureIds:[],clarificationIds:[],detail:'仍需确认支付超时范围。'}]},project:{name:'订单',features:[],requirements:[],clarifications:[],sourceUnits:[]}} as unknown as AnalysisTask;
-    const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined}));
+    const html=renderToStaticMarkup(React.createElement(TaskFeedback,{task,onAdjust:async()=>undefined,onEditMaterials:()=>undefined}));
     expect(html).toContain('调整本版结果');
     expect(html).toContain('可以调整模块组织、需求颗粒度或指出遗漏');
     expect(html).toContain('按说明调整');
+    expect(html).toContain('更新资料并重新分析');
     expect(html).toContain('已落实 1 项，1 项仍需处理');
     expect(html).toContain('退款金额已统一为含税口径。');
     expect(html).toContain('仍需确认支付超时范围。');
@@ -173,7 +174,7 @@ describe('需求细化数据契约', () => {
     const requirement={id:'R-1',featureId:'F-1',text:'按条件返回订单。',sourceRefs:[],state:'reviewed',deliveryScope:'current'};
     const task={id:'T-1',resultVersion:2,status:'completed',progress:100,attempt:1,createdAt:1,requestedAt:1,completedAt:2,steps:[],runtimeMetrics:[{sessionId:'details-F-1',adapter:'codex-oauth',model:'gpt-5.6-terra',reasoningEffort:'medium',startedAt:1,completedAt:2,durationMs:1}],project:{id:'P-1',name:'订单中心',sourceName:'订单.prd',sourceHash:'x',revision:1,importedAt:'2026-09-13',rawText:'',stage:'review',sourceUnits:[],features:[{id:'F-1',name:'订单查询',sourceUnitIds:[],ruleIds:[],requirementIds:['R-1'],state:'reviewed'}],requirements:[requirement],clarifications:[]}} as AnalysisTask;
     const noop=()=>undefined,asyncNoop=async()=>undefined;
-    const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
+    const html=renderToStaticMarkup(React.createElement(TaskPage,{task,versions:[task],now:3,onBack:noop,onVersion:noop,onAdjust:asyncNoop,onEditMaterials:noop,onScope:asyncNoop,onRetry:asyncNoop,onRestart:asyncNoop,onArchive:asyncNoop,onRestore:asyncNoop,onDelete:asyncNoop}));
     expect(html).toContain('功能与需求');
     expect(html).toContain('全部需求');
     expect(html).toContain('资料包');

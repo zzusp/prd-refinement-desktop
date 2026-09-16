@@ -247,15 +247,24 @@ export class AnalysisTaskScheduler {
   listArchived() { return [...this.tasks.values()].filter(task=>task.archivedAt&&!this.deletedFamilies.has(task.rootTaskId??task.id)).sort((a,b)=>(b.archivedAt??0)-(a.archivedAt??0)).map(task=>structuredClone(task)); }
   get(id: string) { const task = this.tasks.get(id); return task ? structuredClone(task) : undefined; }
   getByOperationId(operationId:string) { const task=[...this.tasks.values()].find(item=>item.operationId===operationId);return task?structuredClone(task):undefined; }
-  async create(input: PrdProject,lineage?:Pick<AnalysisTask,'rootTaskId'|'parentTaskId'|'resultVersion'|'adjustment'>,operationId?:string,requestedAt?:number) {
+  async create(input: PrdProject,lineage?:Pick<AnalysisTask,'rootTaskId'|'parentTaskId'|'baseResultVersion'|'resultVersion'|'adjustment'|'materialRevision'>,operationId?:string,requestedAt?:number) {
     if(operationId){const repeated=[...this.tasks.values()].find(task=>task.operationId===operationId);if(repeated)return structuredClone(repeated)}
     const config = await this.getConfig(), now = Date.now(), id=`T-${randomUUID().slice(0, 8).toUpperCase()}`;
     const task: AnalysisTask = {
-      id, operationId, rootTaskId:lineage?.rootTaskId??id, parentTaskId:lineage?.parentTaskId, resultVersion:lineage?.resultVersion, adjustment:lineage?.adjustment, project: { ...structuredClone(input), sourceDispositions: [], rules: [], features: [], requirements: [], clarifications: [], audit: undefined },
+      id, operationId, rootTaskId:lineage?.rootTaskId??id, parentTaskId:lineage?.parentTaskId, baseResultVersion:lineage?.baseResultVersion, resultVersion:lineage?.resultVersion, adjustment:lineage?.adjustment, materialRevision:lineage?.materialRevision, project: { ...structuredClone(input), sourceDispositions: [], rules: [], features: [], requirements: [], clarifications: [], audit: undefined },
       runtimeConfig: snapshot(config), attempt: 1, checkpoint: { pipelineVersion: CURRENT_PIPELINE_VERSION, resultVersion:0,promptMetrics:[],detailedFeatureIds:[],auditIssues:[],featureCandidateBatches:[],sourceDispositionBatches:[],candidateRepairRounds:[],unificationFeedback:[],detailResults:{},auditIssueBatches:[],relationBatches:[],validationFailures:[] },
       status: 'queued', progress: 0, createdAt: now, requestedAt:requestedAt??now, steps: stages.map(([id, name, note]) => ({ id, name, note, status: 'pending' })),
     };
     this.tasks.set(task.id, task); this.queue.push(task.id); await this.publish(task); void this.pump(); return structuredClone(task);
+  }
+  async enqueueMaterialRevision(request:{baseTaskId:string;baseVersion:number;bundleId:string;project:PrdProject;operationId:string;requestedAt?:number}){
+    const repeated=this.getByOperationId(request.operationId);if(repeated)return repeated;
+    const base=this.tasks.get(request.baseTaskId);
+    if(!base||base.archivedAt||!['completed','needs-attention'].includes(base.status)||base.resultVersion===undefined)throw new Error('基础结果不存在、已归档或尚不可更新资料');
+    const rootTaskId=base.rootTaskId??base.id,latest=this.latestResult(rootTaskId);
+    if(!latest||latest.id!==base.id||request.baseVersion!==base.resultVersion)throw new Error(`结果已更新到第 ${latest?.resultVersion??base.resultVersion} 版，请在最新版上重新准备资料`);
+    if(request.project.materialBundle?.id!==request.bundleId)throw new Error('调整资料与本次分析输入不一致');
+    return this.create(request.project,{rootTaskId,parentTaskId:base.id,baseResultVersion:base.resultVersion,materialRevision:{baseTaskId:base.id,bundleId:request.bundleId}},request.operationId,request.requestedAt);
   }
   async enqueueAdjustment(request: import('../src/types.js').RefinementAdjustmentRequest) {
     const operationId=request.operationId?.trim()||randomUUID();
@@ -678,13 +687,16 @@ export class AnalysisTaskScheduler {
         ledger.source.status='passed';ledger.feature.status=!proofValid?'unknown':openIssues.some(i=>i.owner==='feature-grouping')?'failed':'passed';ledger.detail.status=!proofValid?'unknown':openIssues.some(i=>i.owner==='requirement-detail'||i.owner==='runtime-output')?'failed':'passed';ledger.relation.status=!proofValid||openIssues.some(i=>i.owner==='runtime-output')?'unknown':openIssues.some(i=>i.owner==='requirement-relation')?'failed':'passed';for(const item of Object.values(ledger))item.issueIds=openIssues.filter(issue=>item.id==='feature'?issue.owner==='feature-grouping':item.id==='detail'?issue.owner==='requirement-detail'||issue.owner==='runtime-output':item.id==='relation'?issue.owner==='requirement-relation'||issue.owner==='runtime-output':false).map(issue=>issue.id);cp.checks=ledger;
         const assessment=assessDelivery(task.project,cp.checks,version);task.project.delivery=assessment;const result = path.join(workspace, 'result'); await mkdir(result, { recursive: true });
         const packageRoot=path.join(result,assessment.state==='ready'?'deliveries':'drafts');
-        this.assert(task, attempt); const intendedVersion=task.resultVersion??1,written=await writeAgentPackage(task.project,{...task,status:assessment.state==='ready'?'completed':task.status,resultVersion:intendedVersion},packageRoot);task.resultVersion=intendedVersion;task.artifacts=[...(task.artifacts??[]),{id:`A-${randomUUID().slice(0,8).toUpperCase()}`,kind:assessment.state==='ready'?'agent-package':'draft',path:written.directory,resultVersion:intendedVersion,createdAt:Date.now()}];
+        this.assert(task, attempt); const intendedVersion=task.resultVersion??(task.materialRevision&&task.baseResultVersion!==undefined?task.baseResultVersion+1:1),written=await writeAgentPackage(task.project,{...task,status:assessment.state==='ready'?'completed':task.status,resultVersion:intendedVersion},packageRoot);if(!task.materialRevision)task.resultVersion=intendedVersion;task.artifacts=[...(task.artifacts??[]),{id:`A-${randomUUID().slice(0,8).toUpperCase()}`,kind:assessment.state==='ready'?'agent-package':'draft',path:written.directory,resultVersion:intendedVersion,createdAt:Date.now()}];
         this.assert(task, attempt); await this.writeAtomic(path.join(this.root, `${task.project.id}.project.json`), task.project);
       });
       this.assert(task, attempt); task.status = 'completed'; task.progress = 100;task.error=undefined; task.completedAt = Date.now();
       if(task.adjustment&&task.parentTaskId&&task.resultVersion===undefined){
         const rootTaskId=task.rootTaskId??task.parentTaskId,baseVersion=task.baseResultVersion??1;
         await this.withFamilyCommit(rootTaskId,async()=>{const latest=this.latestResult(rootTaskId);if(!latest||latest.id!==task.parentTaskId||latest.resultVersion!==baseVersion)throw new Error(`基础结果已更新：当前为第 ${latest?.resultVersion??baseVersion} 版；本次输入和候选已保留，请在最新版上重新提交`);task.resultVersion=baseVersion+1;await this.publish(task)});
+      }else if(task.materialRevision&&task.parentTaskId&&task.resultVersion===undefined){
+        const rootTaskId=task.rootTaskId??task.parentTaskId,baseVersion=task.baseResultVersion??1;
+        await this.withFamilyCommit(rootTaskId,async()=>{const latest=this.latestResult(rootTaskId);if(!latest||latest.id!==task.parentTaskId||latest.resultVersion!==baseVersion)throw new Error(`基础结果已更新：当前为第 ${latest?.resultVersion??baseVersion} 版；新资料已保留，请在最新版上重新提交`);task.resultVersion=baseVersion+1;await this.publish(task)});
       }else await this.publish(task);
     } catch (error) {
       if (task.attempt !== attempt) return;

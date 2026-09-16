@@ -45,6 +45,27 @@ export class MaterialBundleStore {
   private invalidate(b:StoredBundle){b.revision++;b.state='draft';b.indexedRevision=undefined;b.error=undefined;b.issues=[];b.progress={completed:0,total:b.files.length,phase:'等待识别'};for(const f of b.files)if(f.blob&&!f.exclusionReason){f.status='registered';f.reason=undefined;f.sourceCount=undefined}}
   async initialize(){await mkdir(this.root,{recursive:true});for(const entry of await readdir(this.root,{withFileTypes:true})){if(!entry.isDirectory()||!/^[A-Za-z0-9-]+$/.test(entry.name))continue;let b:StoredBundle;try{b=await this.load(entry.name)}catch{continue}if(b.state==='indexing'){b.state='cancelled';b.error='上次识别被中断，请重新建立索引';await this.save(b)}}}
   async create(){const id='B-'+randomUUID();const b:StoredBundle={id,name:'未命名资料包',revision:1,state:'draft',files:[],references:[],issues:[],bindings:{},progress:{completed:0,total:0,phase:'等待添加资料'},updatedAt:new Date().toISOString()};await this.save(b);return this.view(b)}
+  async prepareAdjustment(taskId:string,resultVersion:number,project:PrdProject){
+    if(!taskId.trim()||!Number.isInteger(resultVersion)||resultVersion<1)throw new Error('调整资料基准无效');
+    const existing=(await this.list()).find(bundle=>bundle.adjustmentBase?.taskId===taskId&&bundle.adjustmentBase.resultVersion===resultVersion);
+    if(existing)return existing;
+    const bundle=await this.create();
+    try{
+      if(project.inputSnapshotPath&&project.materialSnapshot){
+        const files=project.materialSnapshot.files.filter(file=>file.status!=='excluded').sort((a,b)=>Number(b.role==='primary')-Number(a.role==='primary'));
+        for(const file of files){
+          const source=contained(project.inputSnapshotPath,`input/${file.logicalPath}`),directory=path.posix.dirname(file.logicalPath);
+          const next=await this.add(bundle.id,[source],{kind:'files',role:file.role,mount:directory==='.'?undefined:directory});
+          const copied=next.files.find(item=>item.logicalPath===file.logicalPath);
+          if(!copied||copied.hash!==file.hash)throw new Error(`冻结资料校验失败：${file.logicalPath}`);
+        }
+      }
+      if(project.analysisInput?.text)await this.saveAnalysisDraft(bundle.id,project.analysisInput.text,0);
+      return await this.serial(bundle.id,async()=>{
+        const stored=await this.load(bundle.id);stored.name=`${project.name} · 调整资料`;stored.adjustmentBase={taskId,resultVersion};await this.save(stored);return this.view(stored);
+      });
+    }catch(error){await rm(this.dir(bundle.id),{recursive:true,force:true});throw error}
+  }
   async list(){const result:MaterialBundle[]=[];for(const entry of await readdir(this.root,{withFileTypes:true})){if(entry.isDirectory()&&/^[A-Za-z0-9-]+$/.test(entry.name)){try{result.push(await this.get(entry.name))}catch{/* 损坏清单不伪造正常对象 */}}}return result.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
   async get(id:string){return this.view(await this.load(id))}
   async renameBundle(id:string,name:string){return this.serial(id,async()=>{const b=await this.load(id);this.writable(b);const next=name.trim();if(!next)throw new Error('资料包名称不能为空');if(next.length>100)throw new Error('资料包名称不能超过 100 个字符');b.name=next;await this.save(b);return this.view(b)})}

@@ -18,6 +18,7 @@ export interface MaterialBundle {
   files: MaterialFile[]; references: MaterialReference[]; issues: MaterialIssue[];
   progress: {completed: number; total: number; phase: string}; updatedAt: string;
   analysisDraft?: { text: string; revision: number; updatedAt: string };
+  adjustmentBase?: { taskId: string; resultVersion: number };
   error?: string;
 }
 export interface MaterialBundleSnapshot {
@@ -49,4 +50,5 @@ export interface MaterialApi {
   query(id: string, query: MaterialQuery): Promise<MaterialSearchResult>;
   read(id: string, unitIds: string[]): Promise<SourceUnit[]>;
   project(id: string): Promise<PrdProject>;
+  prepareAdjustment(taskId: string, resultVersion: number): Promise<MaterialBundle>;
 }

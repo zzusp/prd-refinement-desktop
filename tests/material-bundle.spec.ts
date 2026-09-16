@@ -35,6 +35,19 @@ describe('资料包快照、索引和恢复',()=>{
   const {store}=await setup(),project={id:'P',name:'旧任务',sourceName:'old.md',sourceHash:'x',revision:1,importedAt:'now',rawText:'旧内容',stage:'review',sourceUnits:[],features:[],requirements:[],clarifications:[]} as PrdProject;
   const prepared=await store.prepareAdjustment('T-OLD',1,project);expect(prepared.files).toEqual([]);expect(prepared.adjustmentBase).toEqual({taskId:'T-OLD',resultVersion:1});
  });
+ it('旧任务缺少资料快照元数据时从冻结输入和来源文档恢复已有空草稿',async()=>{
+  const {root,store}=await setup(),snapshot=path.join(root,'legacy-snapshot');
+  await mkdir(path.join(snapshot,'input','参考'),{recursive:true});
+  await writeFile(path.join(snapshot,'input','main.md'),'主需求','utf8');
+  await writeFile(path.join(snapshot,'input','参考','rule.txt'),'补充规则','utf8');
+  const project={id:'P',name:'旧任务',sourceName:'main.md',sourceHash:'x',revision:1,importedAt:'now',rawText:'主需求',stage:'review',sourceUnits:[],sourceDocuments:[
+   {fileId:'F-MAIN',revision:1,logicalPath:'main.md',role:'primary' as const,rawText:'主需求'},
+   {fileId:'F-RULE',revision:1,logicalPath:'参考/rule.txt',role:'supplement' as const,rawText:'补充规则'}
+  ],inputSnapshotPath:snapshot,analysisInput:{text:'沿用当前说明',revision:1,submittedAt:'now',operationId:'OP-LEGACY',fingerprint:'legacy'},features:[],requirements:[],clarifications:[]} as PrdProject;
+  const empty=await store.prepareAdjustment('T-LEGACY',2,{...project,inputSnapshotPath:undefined});expect(empty.files).toEqual([]);
+  const restored=await store.prepareAdjustment('T-LEGACY',2,project);
+  expect(restored.id).toBe(empty.id);expect(restored.files.map(file=>[file.logicalPath,file.role])).toEqual([['main.md','primary'],['参考/rule.txt','supplement']]);expect(restored.analysisDraft?.text).toBe('沿用当前说明');
+ });
  it('只处理用户上传的文件，不根据文档引用判断缺件',async()=>{
   const {root,store,bundle}=await setup();await addPrimary(store,bundle.id,await file(root,'main.html','<h1>订单</h1><p>点击筛选</p><img src="assets/filter.svg">'));
   const ready=await index(store,bundle.id);expect(ready.state,JSON.stringify(ready.issues)).toBe('ready');expect(ready.references).toEqual([]);expect(ready.issues).toEqual([]);expect((await store.project(bundle.id)).rawText).toContain('点击筛选');

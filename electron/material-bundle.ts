@@ -48,19 +48,21 @@ export class MaterialBundleStore {
   async prepareAdjustment(taskId:string,resultVersion:number,project:PrdProject){
     if(!taskId.trim()||!Number.isInteger(resultVersion)||resultVersion<1)throw new Error('调整资料基准无效');
     const existing=(await this.list()).find(bundle=>bundle.adjustmentBase?.taskId===taskId&&bundle.adjustmentBase.resultVersion===resultVersion);
-    if(existing)return existing;
-    const bundle=await this.create();
+    if(existing?.files.length)return existing;
+    const bundle=existing??await this.create();
     try{
-      if(project.inputSnapshotPath&&project.materialSnapshot){
-        const files=project.materialSnapshot.files.filter(file=>file.status!=='excluded').sort((a,b)=>Number(b.role==='primary')-Number(a.role==='primary'));
+      if(project.inputSnapshotPath){
+        const files=(project.materialSnapshot?.files.filter(file=>file.status!=='excluded')
+          ??project.sourceDocuments?.map(file=>({logicalPath:file.logicalPath,role:file.role,hash:undefined})))
+          ?.sort((a,b)=>Number(b.role==='primary')-Number(a.role==='primary'))??[];
         for(const file of files){
           const source=contained(project.inputSnapshotPath,`input/${file.logicalPath}`),directory=path.posix.dirname(file.logicalPath);
           const next=await this.add(bundle.id,[source],{kind:'files',role:file.role,mount:directory==='.'?undefined:directory});
           const copied=next.files.find(item=>item.logicalPath===file.logicalPath);
-          if(!copied||copied.hash!==file.hash)throw new Error(`冻结资料校验失败：${file.logicalPath}`);
+          if(!copied||(file.hash&&copied.hash!==file.hash))throw new Error(`冻结资料校验失败：${file.logicalPath}`);
         }
       }
-      if(project.analysisInput?.text)await this.saveAnalysisDraft(bundle.id,project.analysisInput.text,0);
+      if(project.analysisInput?.text&&!existing?.analysisDraft)await this.saveAnalysisDraft(bundle.id,project.analysisInput.text,0);
       return await this.serial(bundle.id,async()=>{
         const stored=await this.load(bundle.id);stored.name=`${project.name} · 调整资料`;stored.adjustmentBase={taskId,resultVersion};await this.save(stored);return this.view(stored);
       });

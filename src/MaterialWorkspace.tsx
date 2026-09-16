@@ -3,10 +3,8 @@ import { FileText, FolderOpen, Plus, RotateCw, Search, Upload, X } from 'lucide-
 import type { MaterialBundle, MaterialFile, MaterialRole, MaterialSearchResult } from './material-types';
 import type { AnalysisTask, SourceUnit } from './types';
 import { readableContext, sourceHeading, sourcePosition } from './result-presentation';
+import { materialFileStateLabels as fileStates, materialRoleLabels as roles, materialStateLabels as states } from './material-presentation';
 
-const states = { draft: '待识别', indexing: '识别与索引中', 'needs-materials': '待补充资料', ready: '索引就绪', failed: '索引失败', cancelled: '已取消' };
-const fileStates = { registered: '待读取', reading: '读取中', read: '已读取', blocked: '需要处理', excluded: '已排除' };
-const roles: Record<MaterialRole, string> = { primary: '主 PRD', supplement: '补充资料', historical: '历史参考' };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export function MaterialWorkspace({ onStarted, onBack }: { onStarted: (task:AnalysisTask) => void; onBack: () => void }) {

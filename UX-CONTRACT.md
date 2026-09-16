@@ -25,7 +25,7 @@
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 |---|---|---|---|---|
 | File upload | `src/MaterialWorkspace.tsx` | `electron/material-bundle.ts` | 主 PRD、补充文件和目录 | component + E2E |
-| Analysis input | `src/MaterialWorkspace.tsx` 的“补充说明与调整”与任务页 `TaskFeedback` | `electron/material-bundle.ts`、`electron/scheduler-v2.ts` | 首次分析、结果调整 | unit + E2E |
+| Analysis input | `src/MaterialWorkspace.tsx` 的“补充说明与调整”、任务页 `TaskFeedback` 与只读 `TaskMaterials` | `electron/material-bundle.ts`、`electron/scheduler-v2.ts` | 首次分析、结果调整、任务快照 | unit + E2E |
 | Search | `src/App.tsx` 的 `RequirementTable` | `src/App.tsx` | 需求明细本地过滤 | keyboard + E2E |
 | Table Selection | `src/App.tsx` 的 `ListControls` 与 `ScopeToolbar` | `docs/spec/task-scope-delivery-workspace.md` | 本页、当前筛选结果 | component + E2E |
 | Select/Listbox | native | `src/styles.css` | Runtime 配置、资料包恢复、资料用途和来源文件 | keyboard + E2E |
@@ -64,7 +64,7 @@
 
 - 单份 PRD 的目标规模为 20–100 个功能点、100–1000 个需求明细。
 - 主路径固定为上传文件、查看执行过程、审阅结果汇总；不在单页同时展开全部层级。
-- 功能与需求、全部需求和执行记录是任务详情的独立视图；单条详情仅在用户选择时打开。视图切换使用普通按钮，不声明未实现方向键模型的 ARIA tabs。
+- 功能与需求、全部需求、资料包和执行记录是任务详情的独立视图；资料包只读展示任务启动时冻结的文件元数据和本次分析输入，旧任务缺少完整快照时明确降级。单条详情仅在用户选择时打开。视图切换使用普通按钮，不声明未实现方向键模型的 ARIA tabs。
 - Excel 是用户交付物，应用内部 JSON 只用于恢复任务和结果页面。
 - 顶部“任务”是所有分析任务的统一入口；任务列表展示状态、当前阶段、进度、总耗时和创建时间。
 - 多个运行中任务彼此独立推进；最大并行数用于真实 Harness 调度，超限任务进入排队。

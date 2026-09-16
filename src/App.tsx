@@ -275,7 +275,7 @@ export function stepOutputSummary(task: AnalysisTask, step: AnalysisTask["steps"
       return undefined;
   }
 }
-type Page = "tasks" | "upload" | "task" | "settings";
+type Page = "tasks" | "upload" | "adjust-materials" | "task" | "settings";
 type ResultTab = "features" | "requirements" | "materials" | "execution";
 type AdjustmentRequest = RefinementAdjustmentRequest;
 function taskRootId(task: AnalysisTask) {
@@ -339,6 +339,7 @@ export function App() {
   const [archivedTasks, setArchivedTasks] = useState<AnalysisTask[]>([]);
   const [page, setPage] = useState<Page>("tasks");
   const [activeId, setActiveId] = useState("");
+  const [materialAdjustment, setMaterialAdjustment] = useState<AnalysisTask>();
   const [now, setNow] = useState(Date.now());
   const [harness, setHarness] = useState<RuntimeStatus>({
     available: false,
@@ -486,6 +487,21 @@ export function App() {
           }}
           onBack={() => setPage("tasks")}
         />
+      ) : page === "adjust-materials" && materialAdjustment ? (
+        <MaterialWorkspace
+          mode={{kind:"adjustment",baseTaskId:materialAdjustment.id,baseVersion:taskVersion(materialAdjustment),projectName:materialAdjustment.project.name}}
+          onStarted={(task) => {
+            setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+            setActiveId(task.id);
+            setMaterialAdjustment(undefined);
+            setPage("task");
+          }}
+          onBack={() => {
+            setActiveId(materialAdjustment.id);
+            setMaterialAdjustment(undefined);
+            setPage("task");
+          }}
+        />
       ) : page === "settings" ? (
         <RuntimeSettings status={harness} onStatus={setHarness} />
       ) : active ? (
@@ -496,6 +512,10 @@ export function App() {
           onBack={() => setPage("tasks")}
           onVersion={setActiveId}
           onAdjust={adjust}
+          onEditMaterials={(task) => {
+            setMaterialAdjustment(task);
+            setPage("adjust-materials");
+          }}
           onScope={updateScope}
           onRetry={retry}
           onRestart={restart}
@@ -831,6 +851,7 @@ function TaskPage({
   onBack,
   onVersion,
   onAdjust,
+  onEditMaterials,
   onScope,
   onRetry,
   onRestart,
@@ -844,6 +865,7 @@ function TaskPage({
   onBack: () => void;
   onVersion: (id: string) => void;
   onAdjust: (request: AdjustmentRequest) => Promise<void>;
+  onEditMaterials: (task: AnalysisTask) => void;
   onScope: (request: DeliveryScopeUpdateRequest) => Promise<void>;
   onRetry: (task: AnalysisTask) => Promise<void>;
   onRestart: (task: AnalysisTask) => Promise<void>;
@@ -1108,7 +1130,7 @@ function TaskPage({
       )}
       {canAdjust && adjusting && (
         <div id="task-adjustment-panel">
-          <TaskFeedback task={task} onAdjust={onAdjust} onClose={() => setAdjusting(false)} />
+          <TaskFeedback task={task} onAdjust={onAdjust} onEditMaterials={() => onEditMaterials(task)} onClose={() => setAdjusting(false)} />
         </div>
       )}
       <Results
@@ -1315,10 +1337,12 @@ function feedbackStorage() {
 export function TaskFeedback({
   task,
   onAdjust,
+  onEditMaterials,
   onClose,
 }: {
   task: AnalysisTask;
   onAdjust: (request: AdjustmentRequest) => Promise<void>;
+  onEditMaterials?: () => void;
   onClose?: () => void;
 }) {
   const storageKey = `prd-feedback-draft:${taskRootId(task)}`;
@@ -1421,6 +1445,19 @@ export function TaskFeedback({
           </div>
           {onClose && <button className="text-action" type="button" onClick={onClose}>收起</button>}
         </div>
+        {onEditMaterials && (
+          <section className="feedback-material-route" aria-labelledby="feedback-material-title">
+            <div>
+              <strong id="feedback-material-title">PRD 或补充资料有变化</strong>
+              <span>打开本版的独立资料草稿，可更换主 PRD、添加或移除补充文件；旧版本保持不变。</span>
+            </div>
+            <button className="secondary" type="button" disabled={busy} onClick={onEditMaterials}>
+              <FileText />
+              更新资料并重新分析
+            </button>
+          </section>
+        )}
+        <div className="feedback-instruction-divider"><span>仅调整当前结果的组织方式</span></div>
         <label htmlFor="task-feedback-input" className="sr-only">
           调整说明
         </label>

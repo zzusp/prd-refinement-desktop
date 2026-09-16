@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('prdApp', {
     query:(id:string,query:import('../src/material-types.js').MaterialQuery)=>ipcRenderer.invoke('materials:query',id,query),
     read:(id:string,ids:string[])=>ipcRenderer.invoke('materials:read',id,ids),
     project:(id:string)=>ipcRenderer.invoke('materials:project',id),
+    prepareAdjustment:(taskId:string,resultVersion:number)=>ipcRenderer.invoke('materials:prepare-adjustment',taskId,resultVersion),
   },
   importPrd: (file?: File) => {
     const filePath = file ? webUtils.getPathForFile(file) : undefined;
@@ -45,6 +46,7 @@ contextBridge.exposeInMainWorld('prdApp', {
   queryAnalysisArtifacts: (taskId: string) => ipcRenderer.invoke('analysis:artifacts', taskId),
   startAnalysis: (project: PrdProject) => ipcRenderer.invoke('analysis:start', project),
   startMaterialAnalysis: (bundleId:string,text:string,draftRevision:number,operationId:string) => ipcRenderer.invoke('analysis:start-material',bundleId,text,draftRevision,operationId),
+  startMaterialAdjustment: (baseTaskId:string,baseVersion:number,bundleId:string,text:string,draftRevision:number,operationId:string) => ipcRenderer.invoke('analysis:start-material-adjustment',baseTaskId,baseVersion,bundleId,text,draftRevision,operationId),
   cancelAnalysis: (taskId: string) => ipcRenderer.invoke('analysis:cancel', taskId),
   retryAnalysis: (taskId: string) => ipcRenderer.invoke('analysis:retry', taskId),
   restartAnalysis: (taskId: string) => ipcRenderer.invoke('analysis:restart', taskId),

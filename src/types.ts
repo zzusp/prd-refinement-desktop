@@ -384,6 +384,7 @@ export interface AnalysisTask {
   baseResultVersion?: number;
   resultVersion?: number;
   adjustment?: RefinementAdjustment;
+  materialRevision?: { baseTaskId: string; bundleId: string };
   scopeChange?: DeliveryScopeChange;
   artifacts?: TaskArtifact[];
   proposalGeneration?: {status:'running'|'completed'|'failed';startedAt:number;completedAt?:number;calls:number;error?:string};
@@ -477,6 +478,7 @@ declare global {
       queryAnalysisArtifacts(taskId:string): Promise<ArtifactQueryResult[]>;
       startAnalysis(project: PrdProject): Promise<AnalysisTask>;
       startMaterialAnalysis(bundleId:string, text:string, draftRevision:number, operationId:string): Promise<AnalysisTask>;
+      startMaterialAdjustment(baseTaskId:string, baseVersion:number, bundleId:string, text:string, draftRevision:number, operationId:string): Promise<AnalysisTask>;
       cancelAnalysis(taskId: string): Promise<void>;
       retryAnalysis(taskId: string): Promise<void>;
       restartAnalysis(taskId: string): Promise<AnalysisTask>;

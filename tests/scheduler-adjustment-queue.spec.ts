@@ -156,6 +156,14 @@ describe("调整任务队列和版本基准", () => {
       }),
     ).rejects.toThrow("最新版");
   });
+  it('更新资料执行完整分析并保留任务族和基准版本',async()=>{
+    const directory=await root();await save(directory,task('T-BASE',1));
+    const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>{throw new Error('测试不启动模型')});await scheduler.initialize();
+    const revised=project();revised.materialBundle={id:'B-EDIT',revision:3};
+    const created=await scheduler.enqueueMaterialRevision({operationId:'OP-MATERIAL',baseTaskId:'T-BASE',baseVersion:1,bundleId:'B-EDIT',project:revised});
+    expect(created).toMatchObject({rootTaskId:'T-ROOT',parentTaskId:'T-BASE',baseResultVersion:1,materialRevision:{baseTaskId:'T-BASE',bundleId:'B-EDIT'}});expect(created.adjustment).toBeUndefined();expect(created.resultVersion).toBeUndefined();
+    const repeated=await scheduler.enqueueMaterialRevision({operationId:'OP-MATERIAL',baseTaskId:'T-BASE',baseVersion:1,bundleId:'B-EDIT',project:revised});expect(repeated.id).toBe(created.id);await scheduler.cancel(created.id);
+  });
   it("拒绝旧版建议采纳进入仅清单调整流程",async()=>{
     const directory=await root(),base=task('T-BASE',1);base.project.clarifications=[{id:'Q-1',question:'超时多久？',reason:'原文未明确',level:'blocking',knownFacts:'存在超时',unresolvedPoint:'时长',impact:'无法实现',levelReason:'影响业务行为',sourceRefs:[{sourceUnitId:'S1'}],affectedIds:['R1'],state:'open',resolutionProposal:{recommendation:'超时时长设为 30 分钟。',rationale:'沿用当前处理周期。',impact:'等待时间较长。',confirmation:'确认超时时长。',alternatives:[],sourceRefs:[{sourceUnitId:'S1'}]}}];await save(directory,base);
     const scheduler=new AnalysisTaskScheduler(directory,async()=>config,()=>{},()=>{throw new Error('测试不启动模型')});await scheduler.initialize();

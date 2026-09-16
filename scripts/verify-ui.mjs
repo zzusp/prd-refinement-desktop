@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const materials = await readFile(new URL('../src/MaterialWorkspace.tsx', import.meta.url), 'utf8');
 const violations = [];
 if (/alert\s*\(|confirm\s*\(|prompt\s*\(/.test(app)) violations.push('禁止使用原生 alert/confirm/prompt');
 if (!css.includes(':focus-visible')) violations.push('缺少键盘焦点样式');
@@ -15,5 +16,6 @@ if (/selectedProposalIds|generateResolutionProposals|acceptedProposals|待处理
 if (app.includes('ResultIssues') || app.includes('清单校验明细') || app.includes('平台检查记录')) violations.push('用户结果页不得展示平台内部校验过程');
 if (!app.includes('thead-columns requirement-columns') || !app.includes('thead-columns feature-columns')) violations.push('结果表头必须与数据行共用列轨道');
 if (!app.includes('TaskMaterials') || !app.includes('任务固定输入')) violations.push('任务详情资料包视图缺失');
+if (!app.includes('更新资料并重新分析') || !materials.includes('startMaterialAdjustment')) violations.push('调整结果缺少 PRD 与补充资料更新路径');
 if (violations.length) { console.error(violations.join('\n')); process.exit(1); }
 console.log('UI contract smoke check passed');

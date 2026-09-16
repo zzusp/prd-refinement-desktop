@@ -100,6 +100,13 @@ if (ownsInstance) app.whenReady().then(async () => {
   materialHandler('materials:project',(id:string)=>materials.project(id));
   const scheduler = new AnalysisTaskScheduler(taskRoot(), loadConfig, task => { for (const window of BrowserWindow.getAllWindows()) window.webContents.send('analysis:task-update', task); });
   await scheduler.initialize();
+  materialHandler('materials:prepare-adjustment',async(taskId:string,resultVersion:number)=>{
+    const task=scheduler.get(taskId);
+    if(!task||task.archivedAt||task.resultVersion!==resultVersion||!['completed','needs-attention'].includes(task.status))throw new Error('当前结果不可用于更新资料');
+    const root=task.rootTaskId??task.id,latest=scheduler.list().filter(item=>(item.rootTaskId??item.id)===root&&item.resultVersion!==undefined).sort((a,b)=>(b.resultVersion??0)-(a.resultVersion??0))[0];
+    if(!latest||latest.id!==task.id)throw new Error(`结果已更新到第 ${latest?.resultVersion??resultVersion} 版，请在最新版上准备资料`);
+    return materials.prepareAdjustment(task.id,resultVersion,task.project);
+  });
   ipcMain.handle('projects:list', async () => {
     const files = (await readdir(dataRoot())).filter((item) => item.endsWith('.json'));
     const projects = await Promise.all(files.map(async (file) => JSON.parse(await readFile(path.join(dataRoot(), file), 'utf8')) as PrdProject));
@@ -163,6 +170,23 @@ if (ownsInstance) app.whenReady().then(async () => {
       const task=await scheduler.create(canonical,undefined,normalizedOperationId,requestedAt);
       if(task.project.inputSnapshotPath!==snapshot)await rm(snapshot,{recursive:true,force:true});
       return task;
+    }catch(error){await rm(snapshot,{recursive:true,force:true});throw error}
+  });
+  ipcMain.handle('analysis:start-material-adjustment', async (_event,baseTaskId:string,baseVersion:number,bundleId:string,text:string,draftRevision:number,operationId:string) => {
+    const requestedAt=Date.now();
+    if(typeof baseTaskId!=='string'||!Number.isInteger(baseVersion)||typeof bundleId!=='string'||typeof text!=='string'||typeof operationId!=='string'||!operationId.trim())throw new Error('更新资料输入无效');
+    const normalizedOperationId=operationId.trim(),repeated=scheduler.getByOperationId(normalizedOperationId);if(repeated)return repeated;
+    const prepared=await materials.get(bundleId);
+    if(prepared.adjustmentBase?.taskId!==baseTaskId||prepared.adjustmentBase.resultVersion!==baseVersion)throw new Error('资料草稿不属于当前结果版本');
+    const saved=await materials.saveAnalysisDraft(bundleId,text,draftRevision);
+    if(saved.indexedRevision!==saved.revision||saved.state!=='ready'){await materials.index(bundleId);await materials.wait(bundleId)}
+    const ready=await materials.get(bundleId);if(ready.state!=='ready'||ready.indexedRevision!==ready.revision)throw new Error(ready.error??'资料未能完成读取，请处理具体文件问题后重试');
+    const snapshot=path.join(taskRoot(),'input-snapshots',randomUUID());
+    try{
+      const canonical=await materials.project(bundleId,snapshot),draft=ready.analysisDraft??saved.analysisDraft!;
+      canonical.analysisInput={text:draft.text,revision:draft.revision,submittedAt:new Date().toISOString(),operationId:normalizedOperationId,fingerprint:createHash('sha256').update(JSON.stringify({baseTaskId,baseVersion,bundleId,materialRevision:ready.revision,text:draft.text,draftRevision:draft.revision})).digest('hex')};
+      const task=await scheduler.enqueueMaterialRevision({baseTaskId,baseVersion,bundleId,project:canonical,operationId:normalizedOperationId,requestedAt});
+      if(task.project.inputSnapshotPath!==snapshot)await rm(snapshot,{recursive:true,force:true});return task;
     }catch(error){await rm(snapshot,{recursive:true,force:true});throw error}
   });
   ipcMain.handle('analysis:cancel', (_event, taskId: string) => scheduler.cancel(taskId));

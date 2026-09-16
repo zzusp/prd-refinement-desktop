@@ -12,6 +12,7 @@ import { packageQuality, writeAgentPackage } from './export-agent-package.js';
 import { AnalysisTaskScheduler, CURRENT_PIPELINE_VERSION } from './scheduler-v2.js';
 import { MaterialBundleStore } from './material-bundle.js';
 import type { MaterialAddition, MaterialFilePatch, MaterialQuery } from '../src/material-types.js';
+import { checkForAppUpdate, RELEASES_URL } from './app-update.js';
 
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -100,6 +101,11 @@ if (ownsInstance) app.whenReady().then(async () => {
   materialHandler('materials:project',(id:string)=>materials.project(id));
   const scheduler = new AnalysisTaskScheduler(taskRoot(), loadConfig, task => { for (const window of BrowserWindow.getAllWindows()) window.webContents.send('analysis:task-update', task); });
   await scheduler.initialize();
+  ipcMain.handle('app:version', () => ({ currentVersion: app.getVersion() }));
+  ipcMain.handle('app:check-update', () => checkForAppUpdate(app.getVersion()));
+  ipcMain.handle('app:open-release', async () => {
+    await shell.openExternal(RELEASES_URL);
+  });
   ipcMain.handle('projects:list', async () => {
     const files = (await readdir(dataRoot())).filter((item) => item.endsWith('.json'));
     const projects = await Promise.all(files.map(async (file) => JSON.parse(await readFile(path.join(dataRoot(), file), 'utf8')) as PrdProject));

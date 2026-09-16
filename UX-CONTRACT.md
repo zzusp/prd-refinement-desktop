@@ -27,6 +27,7 @@
 | File upload | `src/MaterialWorkspace.tsx` | `electron/material-bundle.ts` | 主 PRD、补充文件和目录 | component + E2E |
 | Analysis input | `src/MaterialWorkspace.tsx` 的“补充说明与调整”与任务页 `TaskFeedback` | `electron/material-bundle.ts`、`electron/scheduler-v2.ts` | 首次分析、结果调整 | unit + E2E |
 | Search | `src/App.tsx` 的 `RequirementTable` | `src/App.tsx` | 需求明细本地过滤 | keyboard + E2E |
+| Table Selection | `src/App.tsx` 的 `ScopeToolbar` | `docs/spec/task-scope-delivery-workspace.md` | 本页、当前筛选结果 | component + E2E |
 | Select/Listbox | native | `src/styles.css` | Runtime 配置、资料包恢复、资料用途和来源文件 | keyboard + E2E |
 | Toast | 暂不适用 | 本契约 | 后续统一实现 | n/a |
 | Scrollbar | `src/styles.css` | DESIGN.md | panel scroll | browser inspection |

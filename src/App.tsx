@@ -1837,54 +1837,30 @@ function ScopeToolbar({
   onSelected: (ids: string[]) => void;
   onApply: (scope: "current" | "excluded") => void;
 }) {
+  const hasSelection = selected.length > 0;
   return (
-    <div className="scope-toolbar">
-      <div>
-        <strong>已选 {selected.length} 项</strong>
-        <span>
-          {selected.length
-            ? `当前筛选共 ${allIds.length} 项`
-            : "复选框只选择本次批量操作，不代表已保存范围。"}
-        </span>
+    <div className={`scope-toolbar${hasSelection ? " has-selection" : ""}`}>
+      <div className="scope-selection-summary" aria-live="polite">
+        <b>{selected.length}</b>
+        <div>
+          <strong>{hasSelection ? "项已加入批量操作" : "选择要调整的条目"}</strong>
+          <span>{hasSelection ? `当前筛选共 ${allIds.length} 项，可继续勾选` : "勾选只用于本次操作，不会立即更改本期范围。"}</span>
+        </div>
       </div>
-      <div className="scope-select-actions">
-        <button
-          className="text-action"
-          disabled={!pageIds.length}
-          onClick={() => onSelected([...new Set([...selected, ...pageIds])])}
-        >
-          全选本页
-        </button>
-        <button
-          className="text-action"
-          disabled={!allIds.length}
-          onClick={() => onSelected(allIds)}
-        >
-          选择当前筛选全部（{allIds.length}）
-        </button>
+      <div className="scope-select-actions" aria-label="选择范围">
+        <span className="scope-action-label">选择范围</span>
+        <div>
+          <button className="text-action" disabled={!pageIds.length} onClick={() => onSelected([...new Set([...selected, ...pageIds])])}>全选本页</button>
+          <button className="text-action" disabled={!allIds.length} onClick={() => onSelected(allIds)}>筛选结果全部（{allIds.length}）</button>
+        </div>
       </div>
-      <div className="scope-bulk-actions">
-        <button
-          className="secondary"
-          disabled={!selected.length || busy}
-          onClick={() => onApply("excluded")}
-        >
-          标记本期不做
-        </button>
-        <button
-          className="secondary"
-          disabled={!selected.length || busy}
-          onClick={() => onApply("current")}
-        >
-          恢复本期
-        </button>
-        <button
-          className="text-action"
-          disabled={!selected.length || busy}
-          onClick={() => onSelected([])}
-        >
-          取消选择
-        </button>
+      <div className="scope-bulk-actions" aria-label="批量操作">
+        <span className="scope-action-label">批量操作</span>
+        <div>
+          <button className="secondary" disabled={!hasSelection || busy} onClick={() => onApply("excluded")}>标记本期不做</button>
+          <button className="secondary" disabled={!hasSelection || busy} onClick={() => onApply("current")}>恢复本期</button>
+          <button className="text-action" disabled={!hasSelection || busy} onClick={() => onSelected([])}>清除选择</button>
+        </div>
       </div>
       {message && <p role="status">{message}</p>}
     </div>

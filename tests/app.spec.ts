@@ -167,10 +167,10 @@ describe('需求细化数据契约', () => {
     expect(html).not.toContain('生成交付包');
     expect(html).not.toContain('重新生成产物');
     expect(html).toContain('全选本页功能');
-    expect(html).toContain('选择当前筛选全部（1）');
+    expect(html).toContain('筛选结果全部（1）');
     expect(html).toContain('标记本期不做');
     expect(html).toContain('恢复本期');
-    expect(html).toContain('取消选择');
+    expect(html).toContain('清除选择');
     expect(html).toContain('调整结果');
     expect(html).not.toContain('调整本版结果');
     expect(html).not.toContain('概览');

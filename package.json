@@ -37,12 +37,14 @@
     "files": [
       "docs/tmp/desktop-build/current/dist/**/*",
       "docs/tmp/desktop-build/current/dist-electron/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "asarUnpack": [
       "node_modules/@napi-rs/canvas/**/*"
     ],
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         "dmg",
         "zip"
@@ -51,6 +53,7 @@
       "artifactName": "prd-refinement-desktop-${version}-${arch}.${ext}"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"

@@ -336,6 +336,66 @@ export function runtimeTiming(task: AnalysisTask) {
   return { active, retryWait };
 }
 
+type StartupRuntimeApi = Pick<
+  Window["prdApp"],
+  "inspectRuntime" | "loadRuntimeConfig" | "testRuntime"
+>;
+
+export function shouldTestRuntimeConnection(status: RuntimeStatus) {
+  return (
+    status.available &&
+    !status.reason &&
+    status.authStatus !== "unauthenticated" &&
+    status.authStatus !== "error"
+  );
+}
+
+export async function inspectStartupRuntime(api: StartupRuntimeApi) {
+  const inspected = await api.inspectRuntime();
+  if (!shouldTestRuntimeConnection(inspected)) return inspected;
+  try {
+    return await api.testRuntime(await api.loadRuntimeConfig());
+  } catch {
+    return {
+      ...inspected,
+      routeReady: false,
+      reason: "Runtime 连接检测失败，请前往 Runtime 配置页重试",
+    };
+  }
+}
+
+export const APP_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+type AppUpdateCheckApi = Pick<Window["prdApp"], "checkAppUpdate">;
+
+export function scheduleAppUpdateChecks(
+  api: AppUpdateCheckApi,
+  onResult: (result: AppUpdateResult) => void,
+  onError: (message: string) => void,
+) {
+  let active = true;
+  let checking = false;
+  const check = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      const result = await api.checkAppUpdate();
+      if (active) onResult(result);
+    } catch (error) {
+      if (active)
+        onError(error instanceof Error ? error.message : "更新检查失败，请稍后重试");
+    } finally {
+      checking = false;
+    }
+  };
+  void check();
+  const timer = setInterval(() => void check(), APP_UPDATE_CHECK_INTERVAL_MS);
+  return () => {
+    active = false;
+    clearInterval(timer);
+  };
+}
+
 export function App() {
   const [tasks, setTasks] = useState<AnalysisTask[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<AnalysisTask[]>([]);
@@ -350,14 +410,17 @@ export function App() {
   const [appVersion, setAppVersion] = useState<AppVersionInfo>({
     currentVersion: "—",
   });
+  const [updateResult, setUpdateResult] = useState<AppUpdateResult>();
+  const [updateError, setUpdateError] = useState("");
   useEffect(() => {
     if (!window.prdApp) return;
+    void inspectStartupRuntime(window.prdApp).then(setHarness).catch(() =>
+      setHarness({ available: false, reason: "Runtime 状态检查失败" }),
+    );
     void Promise.all([
-      window.prdApp.inspectRuntime(),
       window.prdApp.loadAnalysisTasks(),
       window.prdApp.loadArchivedAnalysisTasks(),
-    ]).then(([runtime, saved, archived]) => {
-      setHarness(runtime);
+    ]).then(([saved, archived]) => {
       setTasks(saved);
       setArchivedTasks(archived);
       if (saved[0]) setActiveId(saved[0].id);
@@ -382,6 +445,17 @@ export function App() {
   }, []);
   useEffect(() => {
     void window.prdApp?.getAppVersion?.().then(setAppVersion).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!window.prdApp?.checkAppUpdate) return;
+    return scheduleAppUpdateChecks(
+      window.prdApp,
+      (result) => {
+        setUpdateResult(result);
+        setUpdateError("");
+      },
+      setUpdateError,
+    );
   }, []);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -474,7 +548,13 @@ export function App() {
     : [];
   return (
     <main className="platform">
-      <TopBar page={page} setPage={setPage} harness={harness} appVersion={appVersion} />
+      <TopBar
+        page={page}
+        setPage={setPage}
+        harness={harness}
+        appVersion={appVersion}
+        updateResult={updateResult}
+      />
       {page === "tasks" ? (
         <TaskCenter
           tasks={tasks}
@@ -511,7 +591,15 @@ export function App() {
           }}
         />
       ) : page === "settings" ? (
-        <RuntimeSettings status={harness} onStatus={setHarness} appVersion={appVersion} />
+        <RuntimeSettings
+          status={harness}
+          onStatus={setHarness}
+          appVersion={appVersion}
+          updateResult={updateResult}
+          onUpdateResult={setUpdateResult}
+          updateError={updateError}
+          onUpdateError={setUpdateError}
+        />
       ) : active ? (
         <TaskPage
           task={active}
@@ -563,11 +651,13 @@ function TopBar({
   setPage,
   harness,
   appVersion,
+  updateResult,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   harness: RuntimeStatus;
   appVersion: AppVersionInfo;
+  updateResult?: AppUpdateResult;
 }) {
   const name = harness.adapter === "dsh" ? "DeepSeek Harness" : "Codex CLI";
   const label = harness.routeReady
@@ -598,7 +688,10 @@ function TopBar({
         </button>
       </nav>
       <div className="platform-meta">
-        <span className="app-version">v{appVersion.currentVersion}</span>
+        <span className="app-version">
+          v{appVersion.currentVersion}
+          {updateResult?.updateAvailable && ` · 可更新 v${updateResult.latestVersion}`}
+        </span>
         <div className={harness.routeReady ? "runtime ready" : "runtime"}>
           <i />
           <span>{label}</span>
@@ -2512,10 +2605,18 @@ function RuntimeSettings({
   status,
   onStatus,
   appVersion,
+  updateResult,
+  onUpdateResult,
+  updateError,
+  onUpdateError,
 }: {
   status: RuntimeStatus;
   onStatus: (s: RuntimeStatus) => void;
   appVersion: AppVersionInfo;
+  updateResult?: AppUpdateResult;
+  onUpdateResult: (result: AppUpdateResult) => void;
+  updateError: string;
+  onUpdateError: (message: string) => void;
 }) {
   const [config, setConfig] = useState<RuntimeConfig>({
     adapter: "codex-oauth",
@@ -2535,9 +2636,7 @@ function RuntimeSettings({
   const [checkedAt, setCheckedAt] = useState<string>();
   const [checkError, setCheckError] = useState("");
   const [lastCheck, setLastCheck] = useState(false);
-  const [updateResult, setUpdateResult] = useState<AppUpdateResult>();
   const [updateChecking, setUpdateChecking] = useState(false);
-  const [updateError, setUpdateError] = useState("");
   useEffect(() => {
     window.prdApp?.loadRuntimeConfig().then(setConfig);
   }, []);
@@ -2573,11 +2672,11 @@ function RuntimeSettings({
   async function checkUpdate() {
     if (updateChecking || !window.prdApp?.checkAppUpdate) return;
     setUpdateChecking(true);
-    setUpdateError("");
+    onUpdateError("");
     try {
-      setUpdateResult(await window.prdApp.checkAppUpdate());
+      onUpdateResult(await window.prdApp.checkAppUpdate());
     } catch (error) {
-      setUpdateError(error instanceof Error ? error.message : "更新检查失败，请稍后重试");
+      onUpdateError(error instanceof Error ? error.message : "更新检查失败，请稍后重试");
     } finally {
       setUpdateChecking(false);
     }
@@ -2586,7 +2685,7 @@ function RuntimeSettings({
     try {
       await window.prdApp.openAppRelease();
     } catch {
-      setUpdateError("无法打开发布页面，请稍后重试");
+      onUpdateError("无法打开发布页面，请稍后重试");
     }
   }
   function changeAdapter(adapter: RuntimeConfig["adapter"]) {

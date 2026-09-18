@@ -578,7 +578,7 @@ function TopBar({
   return (
     <header className="platform-bar">
       <button className="logo" onClick={() => setPage("tasks")}>
-        <Microscope />
+        <Microscope aria-hidden="true" />
         <strong>需求细化平台</strong>
       </button>
       <nav>

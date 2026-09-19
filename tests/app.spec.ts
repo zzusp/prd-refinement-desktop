@@ -1,10 +1,64 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, shouldSubmitFeedback, stepOutputSummary, TaskFeedback, TaskMaterials, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
+import { APP_UPDATE_CHECK_INTERVAL_MS, App, Drawer, RequirementList, artifactRefreshKey, clearFeedbackDraft, displayProgress, ExecutionRecord, featureScope, inspectStartupRuntime, loadFeedbackDraft, Progress, RuntimeCost, saveFeedbackDraft, scheduleAppUpdateChecks, shouldSubmitFeedback, shouldTestRuntimeConnection, stepOutputSummary, TaskFeedback, TaskMaterials, TaskPage, taskStatusLabel, runtimeTiming } from '../src/App.js';
 import type { AnalysisTask } from '../src/types.js';
 
 describe('需求细化数据契约', () => {
+  it('启动时仅在 Runtime 基础状态正常后执行一次真实连接检测', async()=>{
+    expect(shouldTestRuntimeConnection({available:true,adapter:'codex-oauth',authStatus:'authenticated'})).toBe(true);
+    expect(shouldTestRuntimeConnection({available:false,reason:'未安装'})).toBe(false);
+    expect(shouldTestRuntimeConnection({available:true,adapter:'codex-oauth',authStatus:'unauthenticated'})).toBe(false);
+    const config={adapter:'codex-oauth',provider:'openai-codex',model:'gpt-5.6-terra',reasoningEffort:'low'} as any;
+    const calls:string[]=[];
+    const connected=await inspectStartupRuntime({
+      inspectRuntime:async()=>{calls.push('inspect');return{available:true,adapter:'codex-oauth',authStatus:'authenticated'}},
+      loadRuntimeConfig:async()=>{calls.push('config');return config},
+      testRuntime:async received=>{calls.push('test');expect(received).toBe(config);return{available:true,adapter:'codex-oauth',authStatus:'authenticated',routeReady:true}},
+    });
+    expect(calls).toEqual(['inspect','config','test']);
+    expect(connected.routeReady).toBe(true);
+  });
+
+  it('启动时基础状态异常不会发起模型连接请求', async()=>{
+    const loadRuntimeConfig=async()=>{throw new Error('不应读取配置')};
+    const testRuntime=async()=>{throw new Error('不应检测连接')};
+    await expect(inspectStartupRuntime({inspectRuntime:async()=>({available:false,reason:'未找到 Runtime'}),loadRuntimeConfig,testRuntime})).resolves.toEqual({available:false,reason:'未找到 Runtime'});
+    const unauthenticated=await inspectStartupRuntime({inspectRuntime:async()=>({available:true,adapter:'codex-oauth',authStatus:'unauthenticated'}),loadRuntimeConfig,testRuntime});
+    expect(unauthenticated.authStatus).toBe('unauthenticated');
+    expect(unauthenticated.routeReady).toBeUndefined();
+  });
+
+  it('启动连接检测异常时保留基础状态并明确标记连接失败', async()=>{
+    const result=await inspectStartupRuntime({
+      inspectRuntime:async()=>({available:true,adapter:'dsh'}),
+      loadRuntimeConfig:async()=>({adapter:'dsh'} as any),
+      testRuntime:async()=>{throw new Error('IPC failed')},
+    });
+    expect(result).toMatchObject({available:true,adapter:'dsh',routeReady:false,reason:'Runtime 连接检测失败，请前往 Runtime 配置页重试'});
+  });
+
+  it('启动时立即检查版本并每小时复查，停止后不再执行', async()=>{
+    vi.useFakeTimers();
+    try {
+      const result={currentVersion:'0.1.6',latestVersion:'0.1.7',updateAvailable:true,releaseUrl:'https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.7',publishedAt:'2026-09-18T00:00:00Z'};
+      const checkAppUpdate=vi.fn(async()=>result),received:typeof result[]=[],errors:string[]=[];
+      const stop=scheduleAppUpdateChecks({checkAppUpdate},value=>received.push(value),message=>errors.push(message));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checkAppUpdate).toHaveBeenCalledTimes(1);
+      expect(received).toEqual([result]);
+      await vi.advanceTimersByTimeAsync(APP_UPDATE_CHECK_INTERVAL_MS);
+      expect(checkAppUpdate).toHaveBeenCalledTimes(2);
+      expect(received).toEqual([result,result]);
+      expect(errors).toEqual([]);
+      stop();
+      await vi.advanceTimersByTimeAsync(APP_UPDATE_CHECK_INTERVAL_MS);
+      expect(checkAppUpdate).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('持久化任务回读前显示空任务页，不注入演示任务',()=>{
     const html=renderToStaticMarkup(React.createElement(App));
     expect(html).toContain('当前任务 <b>0</b>');

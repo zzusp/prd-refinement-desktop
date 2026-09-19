@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+## [0.1.7] - 2026-09-19
+
+### 新增
+
+- 应用启动时在 Runtime 安装和认证状态正常后自动执行一次真实连接检测；任务列表无需等待检测完成。
+- 应用启动时自动检查正式版本，运行期间每小时复查；发现新版时在顶部提示，不自动下载或安装。
+
+### 完善
+
+- 恢复最早使用的显微镜品牌标志，统一应用内 Logo 与桌面图标，并为 Windows 提供多尺寸 ICO。
+
 ## [0.1.6] - 2026-09-16
 
 ### 新增
@@ -73,6 +84,7 @@
 - 完善来源证据绑定、输入预算、审计返工、并发调度和模型用量展示。
 - 统一本地临时产物、验收证据和正式应用数据的目录边界。
 
+[0.1.7]: https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.7
 [0.1.6]: https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.6
 [0.1.5]: https://github.com/zzusp/prd-refinement-desktop/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tzt-company/prd-refinement-desktop/releases/tag/v0.1.4
